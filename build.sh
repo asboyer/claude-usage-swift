@@ -8,8 +8,12 @@ echo "Building ClaudeUsage..."
 # Create app bundle structure
 mkdir -p ClaudeUsage.app/Contents/MacOS
 
+# Copy app icon
+mkdir -p ClaudeUsage.app/Contents/Resources
+cp AppIcon.icns ClaudeUsage.app/Contents/Resources/AppIcon.icns
+
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework Carbon
 
 # Create Info.plist if not exists
 if [ ! -f ClaudeUsage.app/Contents/Info.plist ]; then
@@ -34,6 +38,8 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
     <string>12.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
