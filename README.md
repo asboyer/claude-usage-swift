@@ -36,6 +36,10 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ![Mouse Click Demo](click-demo.gif)
 
+**100% limit** - when your session usage reaches 100%, the menu shows reset time and optional alerts:
+
+![100% Limit Demo](full.gif)
+
 ## Requirements
 
 - macOS 13.0+
