@@ -1,5 +1,6 @@
 import Cocoa
 import Carbon.HIToolbox
+import ServiceManagement
 
 // MARK: - Constants
 
@@ -249,6 +250,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var colorsItem: NSMenuItem!
 
+    // Open at login toggle
+    var openAtLoginEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(openAtLoginEnabled, forKey: "openAtLoginEnabled")
+            openAtLoginItem?.state = openAtLoginEnabled ? .on : .off
+            updateLoginItem()
+        }
+    }
+    var openAtLoginItem: NSMenuItem!
+
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
         didSet {
@@ -318,6 +329,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         selectedSoundName = ud.object(forKey: "selectedSoundName") as? String ?? "Tink"
         if ud.object(forKey: "colorsEnabled") != nil {
             colorsEnabled = ud.bool(forKey: "colorsEnabled")
+        }
+        if ud.object(forKey: "openAtLoginEnabled") != nil {
+            openAtLoginEnabled = ud.bool(forKey: "openAtLoginEnabled")
         }
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
@@ -475,6 +489,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         colorsItem.target = self
         colorsItem.state = colorsEnabled ? .on : .off
         settingsMenu.addItem(colorsItem)
+
+        openAtLoginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
+        openAtLoginItem.target = self
+        openAtLoginItem.state = openAtLoginEnabled ? .on : .off
+        settingsMenu.addItem(openAtLoginItem)
 
         // Notifications submenu
         let notifMenu = NSMenu()
@@ -681,8 +700,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func toggleColors() {
         colorsEnabled = !colorsEnabled
-        // Re-render with colors by triggering a refresh
         refresh()
+    }
+
+    @objc func toggleOpenAtLogin() {
+        openAtLoginEnabled = !openAtLoginEnabled
+    }
+
+    func updateLoginItem() {
+        if #available(macOS 13.0, *) {
+            do {
+                if openAtLoginEnabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {}
+        }
     }
 
     @objc func selectSound(_ sender: NSMenuItem) {
