@@ -149,36 +149,6 @@ func formatResetDate(_ date: Date) -> String {
     }
 }
 
-func formatResetTooltip(_ date: Date) -> String {
-    let diff = date.timeIntervalSince(Date())
-    if diff < 0 { return "T-0:00" }
-
-    let totalSeconds = Int(diff)
-    let hours = totalSeconds / 3600
-    let mins = (totalSeconds % 3600) / 60
-
-    return String(format: "T-%d:%02d", hours, mins)
-}
-
-func formatResetShort(_ date: Date, showH: Bool = true) -> String {
-    let diff = date.timeIntervalSince(Date())
-    if diff < 0 { return "now" }
-
-    let hours = diff / 3600
-    if hours < 1 {
-        return "\(Int(diff) / 60)m"
-    }
-    let quarters = (hours * 4).rounded() / 4
-    let whole = Int(quarters)
-    let frac = quarters - Double(whole)
-    let fracStr: String
-    if frac >= 0.75 { fracStr = "\u{00B3}\u{2044}\u{2084}" }
-    else if frac >= 0.5 { fracStr = "\u{00B9}\u{2044}\u{2082}" }
-    else if frac >= 0.25 { fracStr = "\u{00B9}\u{2044}\u{2084}" }
-    else { fracStr = "" }
-    return "\(whole)\(fracStr)\(showH ? "h" : "")"
-}
-
 // MARK: - Sound Playback
 
 func playClicks(count: Int, soundName: String, delay: TimeInterval = 0.15, completion: (() -> Void)? = nil) {
@@ -226,14 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var menu: NSMenu!
     var timer: Timer?
-    var hoverTimer: Timer?
 
-    // Store state for hover
-    var fiveHourResetDate: Date?
+    // Store state
     var currentPct: String = "..."
-    var isHovering = false
-    var isAnimating = false
-    var animTimer: Timer?
 
     // Data-driven usage items: key -> menu item
     var usageItems: [String: NSMenuItem] = [:]
@@ -271,39 +236,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Sound menu items
     var soundItems: [NSMenuItem] = []
-
-    // Reset info display mode: 0=hover only, 1=auto
-    var resetInfoMode: Int = 0 {
-        didSet {
-            UserDefaults.standard.set(resetInfoMode, forKey: "resetInfoMode")
-            updateResetInfoMenu()
-            scheduleAutoShow()
-        }
-    }
-    var autoShowDelay: TimeInterval = 1.0 {
-        didSet {
-            UserDefaults.standard.set(autoShowDelay, forKey: "autoShowDelay")
-            updateResetInfoMenu()
-            scheduleAutoShow()
-        }
-    }
-    var autoShowTimer: Timer?
-    var isAutoShowing = false
-    var autoShowingReset = false
-
-    // Whether to show the "h" suffix on reset time (e.g. "3½h" vs "3½")
-    var showHourSuffix: Bool = true {
-        didSet {
-            UserDefaults.standard.set(showHourSuffix, forKey: "showHourSuffix")
-            updateResetInfoMenu()
-        }
-    }
-    var showHourSuffixItem: NSMenuItem!
-
-    // Reset info menu items
-    var resetInfoHoverItem: NSMenuItem!
-    var resetInfoAutoItem: NSMenuItem!
-    var delayItems: [NSMenuItem] = []
 
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
@@ -368,12 +300,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             alarmSkipIfPrevZero = ud.object(forKey: "alarmSkipIfPrevZero") as? Bool ?? false
         }
         selectedSoundName = ud.object(forKey: "selectedSoundName") as? String ?? "Tink"
-        resetInfoMode = ud.object(forKey: "resetInfoMode") as? Int ?? 0
-        let savedDelay = ud.double(forKey: "autoShowDelay")
-        if savedDelay > 0 { autoShowDelay = savedDelay }
-        if ud.object(forKey: "showHourSuffix") != nil {
-            showHourSuffix = ud.bool(forKey: "showHourSuffix")
-        }
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
             pinnedKeys = Set(saved)
@@ -396,29 +322,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         menuReady = true
 
-        // Don't set statusItem.menu — handle click manually so hover tracking works
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(statusItemClicked)
-        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // Set menu directly for proper display
+        statusItem.menu = menu
 
         // Update checkmarks
         updateIntervalMenu()
         updateNotificationMenu()
         updateAlarmMenu()
         updateSoundMenu()
-        updateResetInfoMenu()
 
         // Initial fetch
         refresh()
 
         // Start timer
         restartTimer()
-
-        // Poll mouse position to detect hover over status item
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            self?.checkHover()
-        }
-        hoverTimer?.tolerance = 0.1
 
         // Subscribe to sleep/wake notifications
         let wsnc = NSWorkspace.shared.notificationCenter
@@ -469,34 +386,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let intervalItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         intervalItem.submenu = intervalMenu
         menu.addItem(intervalItem)
-
-        // Reset Info submenu
-        let resetInfoMenu = NSMenu()
-        resetInfoHoverItem = NSMenuItem(title: "Hover", action: #selector(setResetInfoHover), keyEquivalent: "")
-        resetInfoHoverItem.target = self
-        resetInfoAutoItem = NSMenuItem(title: "Auto", action: #selector(setResetInfoAuto), keyEquivalent: "")
-        resetInfoAutoItem.target = self
-        resetInfoMenu.addItem(resetInfoHoverItem)
-        resetInfoMenu.addItem(resetInfoAutoItem)
-        resetInfoMenu.addItem(NSMenuItem.separator())
-
-        delayItems.removeAll()
-        let delays: [(String, TimeInterval)] = [("0.25s", 0.25), ("0.5s", 0.5), ("1s", 1.0), ("2s", 2.0)]
-        for (label, delay) in delays {
-            let item = NSMenuItem(title: label, action: #selector(selectDelay(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = delay as NSNumber
-            resetInfoMenu.addItem(item)
-            delayItems.append(item)
-        }
-        resetInfoMenu.addItem(NSMenuItem.separator())
-        showHourSuffixItem = NSMenuItem(title: "Show \"h\"", action: #selector(toggleHourSuffix), keyEquivalent: "")
-        showHourSuffixItem.target = self
-        resetInfoMenu.addItem(showHourSuffixItem)
-
-        let resetInfoItem = NSMenuItem(title: "Reset Info", action: nil, keyEquivalent: "")
-        resetInfoItem.submenu = resetInfoMenu
-        menu.addItem(resetInfoItem)
 
         // Notifications submenu
         let notifMenu = NSMenu()
@@ -612,7 +501,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateNotificationMenu()
         updateAlarmMenu()
         updateSoundMenu()
-        updateResetInfoMenu()
     }
 
     func rebuildMenu() {
@@ -624,85 +512,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func handleSleep() {
         timer?.invalidate()
         timer = nil
-        hoverTimer?.invalidate()
-        hoverTimer = nil
         alarmCheckTimer?.invalidate()
         alarmCheckTimer = nil
-        autoShowTimer?.invalidate()
-        autoShowTimer = nil
     }
 
     @objc func handleWake() {
         restartTimer()
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            self?.checkHover()
-        }
-        hoverTimer?.tolerance = 0.1
         refresh()
-    }
-
-    // MARK: - Hover
-
-    func checkHover() {
-        guard let button = statusItem.button,
-              let window = button.window else { return }
-
-        let mouseLocation = NSEvent.mouseLocation
-        let buttonScreenFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
-        let wasHovering = isHovering
-        isHovering = buttonScreenFrame.contains(mouseLocation)
-
-        if isHovering && !wasHovering && !isAnimating {
-            guard let resetDate = fiveHourResetDate else { return }
-            var target = previousFiveHourUtil >= 100
-                ? formatResetTooltip(resetDate)
-                : formatResetShort(resetDate, showH: showHourSuffix)
-            if alarmCondition != 0 { target += "!" }
-            animateTitle(to: target)
-        } else if !isHovering && wasHovering && !isAnimating {
-            animateTitle(to: currentPct)
-        } else if isHovering && !isAnimating {
-            guard let resetDate = fiveHourResetDate else { return }
-            var title = previousFiveHourUtil >= 100
-                ? formatResetTooltip(resetDate)
-                : formatResetShort(resetDate, showH: showHourSuffix)
-            if alarmCondition != 0 { title += "!" }
-            statusItem.button?.title = title
-        }
-    }
-
-    func animateTitle(to newText: String) {
-        isAnimating = true
-        animTimer?.invalidate()
-
-        let currentText = statusItem.button?.title ?? ""
-        var chars = Array(currentText)
-        var step = 0
-        let newChars = Array(newText)
-        let deleteCount = chars.count
-        let totalSteps = deleteCount + newChars.count
-
-        animTimer = Timer.scheduledTimer(withTimeInterval: 0.035, repeats: true) { [weak self] timer in
-            guard let self = self else { timer.invalidate(); return }
-
-            if step < deleteCount {
-                chars.removeLast()
-                self.statusItem.button?.title = chars.isEmpty ? " " : String(chars)
-            } else {
-                let typeIndex = step - deleteCount
-                if typeIndex < newChars.count {
-                    let partial = String(newChars[0...typeIndex])
-                    self.statusItem.button?.title = partial
-                }
-            }
-
-            step += 1
-            if step >= totalSteps {
-                timer.invalidate()
-                self.statusItem.button?.title = newText
-                self.isAnimating = false
-            }
-        }
     }
 
     // MARK: - Menu Updates
@@ -745,15 +561,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
 
-    @objc func statusItemClicked() {
-        if needsMenuRebuild {
-            rebuildMenu()
-            needsMenuRebuild = false
-        }
-        guard let button = statusItem.button else { return }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
-    }
-
     @objc func setInterval1m() { refreshInterval = 60 }
     @objc func setInterval5m() { refreshInterval = 300 }
     @objc func setInterval30m() { refreshInterval = 1800 }
@@ -783,76 +590,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let name = sender.representedObject as? String else { return }
         selectedSoundName = name
         playClicks(count: 2, soundName: name)
-    }
-
-    @objc func setResetInfoHover() { resetInfoMode = 0 }
-    @objc func setResetInfoAuto() { resetInfoMode = 1 }
-    @objc func toggleHourSuffix() { showHourSuffix = !showHourSuffix }
-
-    @objc func selectDelay(_ sender: NSMenuItem) {
-        guard let delay = sender.representedObject as? NSNumber else { return }
-        autoShowDelay = delay.doubleValue
-    }
-
-    func updateResetInfoMenu() {
-        resetInfoHoverItem?.state = resetInfoMode == 0 ? .on : .off
-        resetInfoAutoItem?.state = resetInfoMode == 1 ? .on : .off
-        for item in delayItems {
-            if let delay = item.representedObject as? NSNumber {
-                item.state = abs(delay.doubleValue - autoShowDelay) < 0.01 ? .on : .off
-            }
-        }
-        showHourSuffixItem?.state = showHourSuffix ? .on : .off
-    }
-
-    func scheduleAutoShow() {
-        autoShowTimer?.invalidate()
-        autoShowTimer = nil
-        isAutoShowing = false
-        autoShowingReset = false
-
-        guard resetInfoMode == 1, fiveHourResetDate != nil else { return }
-
-        startAutoRotation()
-    }
-
-    func startAutoRotation() {
-        autoShowTimer?.invalidate()
-
-        // Determine what to show next
-        let showReset = !autoShowingReset
-        let delay = autoShowDelay
-
-        autoShowTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self = self, self.resetInfoMode == 1 else { return }
-            guard !self.isHovering, !self.isAnimating else {
-                // Retry shortly if hovering or animating
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.startAutoRotation() }
-                return
-            }
-
-            if showReset {
-                guard let resetDate = self.fiveHourResetDate else { return }
-                self.isAutoShowing = true
-                self.autoShowingReset = true
-                let target: String
-                if self.previousFiveHourUtil >= 100 {
-                    target = formatResetTooltip(resetDate)
-                } else {
-                    target = formatResetShort(resetDate, showH: self.showHourSuffix)
-                }
-                var display = target
-                if self.alarmCondition != 0 { display += "!" }
-                self.animateTitle(to: display)
-            } else {
-                self.isAutoShowing = false
-                self.autoShowingReset = false
-                self.animateTitle(to: self.currentPct)
-            }
-
-            // Schedule the next swap
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.startAutoRotation() }
-        }
     }
 
     @objc func togglePin(_ sender: NSMenuItem) {
@@ -993,7 +730,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                        abs(newResetDate.timeIntervalSince(lastReset)) > 60 {
                         triggerAlarmIfNeeded(endedSessionUtil: lastSessionFinalUtil)
                     }
-                    fiveHourResetDate = newResetDate
                     lastKnownResetDate = newResetDate
                     scheduleAlarmCheckTimer(for: newResetDate)
                 }
@@ -1011,13 +747,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let excl = alarmCondition != 0 ? "!" : ""
             if pct >= 100 {
-                if let e = usage.extra_usage, e.is_enabled, let spent = e.used_credits, let util = e.utilization {
+                if let e = usage.extra_usage, e.is_enabled, let spent = e.used_credits {
                     let dollars = spent / 100
-                    if util >= 100 {
-                        currentPct = String(format: "$%.2f%@", dollars, excl)
-                    } else {
-                        currentPct = String(format: "$%.2f%@", dollars, excl)
-                    }
+                    currentPct = String(format: "$%.2f%@", dollars, excl)
                 } else {
                     currentPct = "\(reset)\(excl)"
                 }
@@ -1025,11 +757,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 currentPct = "\(pct)%"
             }
 
-            if !isHovering && !isAutoShowing {
-                statusItem.button?.title = currentPct
-            }
-            isAutoShowing = false
-            scheduleAutoShow()
+            statusItem.button?.title = currentPct
         }
 
         // Extra usage transition detection
@@ -1080,9 +808,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !alarmIsPlaying else { return }
 
         alarmIsPlaying = true
-        playAlarmBursts(soundName: selectedSoundName, checkMuted: { [weak self] in
-            return self?.isHovering ?? false
-        }) { [weak self] in
+        playAlarmBursts(soundName: selectedSoundName, checkMuted: { false }) { [weak self] in
             self?.alarmIsPlaying = false
         }
     }
