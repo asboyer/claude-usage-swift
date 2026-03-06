@@ -1015,22 +1015,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let elapsedPct = max(elapsed / windowSeconds * 100, 1)
         let ratio = utilization / elapsedPct
 
-        // ratio <= 0.8: green, 0.8-1.5: green→yellow, 1.5-2.5: yellow→red, >= 2.5: red
+        // ratio <= 0.75: green, 0.75-1.0: yellow, 1.0-1.5: light orange, 1.5-2.5: dark orange, >= 2.5: red
         let hue: CGFloat
-        if ratio <= 0.8 {
-            hue = 120.0 / 360.0 // green
+        let saturation: CGFloat
+        let brightness: CGFloat
+        if ratio <= 0.75 {
+            hue = 120.0 / 360.0; saturation = 0.8; brightness = 1.0           // green
+        } else if ratio <= 1.0 {
+            hue = 55.0 / 360.0; saturation = 0.85; brightness = 1.0           // yellow
         } else if ratio <= 1.5 {
-            // green (120°) → yellow (50°)
-            let t = CGFloat((ratio - 0.8) / 0.7)
-            hue = (120.0 - t * 70.0) / 360.0
+            hue = 35.0 / 360.0; saturation = 0.8; brightness = 1.0            // light orange
         } else if ratio <= 2.5 {
-            // yellow (50°) → red (0°)
-            let t = CGFloat((ratio - 1.5) / 1.0)
-            hue = (50.0 - t * 50.0) / 360.0
+            hue = 20.0 / 360.0; saturation = 0.9; brightness = 0.9            // dark orange
         } else {
-            hue = 0 // red
+            hue = 0; saturation = 0.8; brightness = 1.0                        // red
         }
-        return NSColor(calibratedHue: hue, saturation: 0.8, brightness: 1.0, alpha: 1.0)
+        return NSColor(calibratedHue: hue, saturation: saturation, brightness: brightness, alpha: 1.0)
     }
 
     func dimmedMenuItemString(_ text: String) -> NSAttributedString {
