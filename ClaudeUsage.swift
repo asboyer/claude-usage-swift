@@ -19,7 +19,8 @@ private let isoFormatterNoFrac: ISO8601DateFormatter = {
 
 private let timeFormatter: DateFormatter = {
     let f = DateFormatter()
-    f.dateFormat = "HH:mm"
+    f.dateFormat = "h:mm:ss a"
+    f.timeZone = TimeZone(identifier: "America/New_York")
     return f
 }()
 
@@ -200,6 +201,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Store state
     var currentPct: String = "..."
+    var hasData = false
 
     // Data-driven usage items: key -> menu item
     var usageItems: [String: NSMenuItem] = [:]
@@ -311,13 +313,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Create status item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "..."
+        statusItem = NSStatusBar.system.statusItem(withLength: 0)
+        statusItem.button?.title = ""
 
         // Create usage menu items for all categories
         for key in allCategoryKeys {
             let label = categoryLabels[key] ?? key
-            let item = NSMenuItem(title: "\(label): ...", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: "\(label): ...", action: #selector(noop), keyEquivalent: "")
+            item.target = self
             usageItems[key] = item
         }
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
@@ -378,7 +381,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         lastMenuCloseTime = Date()
+        if !hasData {
+            statusItem.length = 0
+            statusItem.button?.title = ""
+        }
     }
+
+    @objc func noop() {}
 
     @objc func closeMenu() {
         menu.cancelTracking()
@@ -389,6 +398,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if needsMenuRebuild {
             rebuildMenu()
             needsMenuRebuild = false
+        }
+        // Temporarily make visible if hidden so the menu can anchor
+        if statusItem.length == 0 {
+            statusItem.length = NSStatusItem.variableLength
+            button.title = hasData ? currentPct : "..."
         }
         button.performClick(nil)
     }
@@ -709,12 +723,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Refresh & Update
 
     @objc func refresh() {
-        statusItem.button?.title = "..."
+        if !hasData {
+            statusItem.length = 0
+            statusItem.button?.title = ""
+        }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let token = getOAuthToken() else {
                 DispatchQueue.main.async {
-                    self?.statusItem.button?.title = "?"
+                    self?.hasData = false
+                    self?.statusItem.length = 0
+                    self?.statusItem.button?.title = ""
                 }
                 return
             }
@@ -733,7 +752,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let full = "\(label)\t\(detail)"
         return NSAttributedString(string: full, attributes: [
             .paragraphStyle: paragraph,
-            .font: NSFont.menuFont(ofSize: 14)
+            .font: NSFont.menuFont(ofSize: 14),
+            .foregroundColor: NSColor.labelColor
+        ])
+    }
+
+    func dimmedMenuItemString(_ text: String) -> NSAttributedString {
+        return NSAttributedString(string: text, attributes: [
+            .font: NSFont.menuFont(ofSize: 14),
+            .foregroundColor: NSColor.secondaryLabelColor
         ])
     }
 
@@ -753,7 +780,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func updateUI(usage: UsageResponse?) {
         guard let usage = usage else {
-            statusItem.button?.title = "?"
+            hasData = false
+            statusItem.length = 0
+            statusItem.button?.title = ""
             return
         }
 
@@ -819,6 +848,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 currentPct = "\(pct)%"
             }
 
+            hasData = true
+            statusItem.length = NSStatusItem.variableLength
             statusItem.button?.title = currentPct
         }
 
@@ -834,7 +865,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Updated time
         let stale = isDataStale() ? " (stale)" : ""
-        updatedItem.title = "Updated: \(timeFormatter.string(from: Date()))\(stale)"
+        let updatedText = "Updated: \(timeFormatter.string(from: Date()))\(stale)"
+        updatedItem.title = updatedText
+        updatedItem.attributedTitle = dimmedMenuItemString(updatedText)
     }
 
     func isDataStale() -> Bool {
