@@ -10,9 +10,9 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 - **Live usage percentage** in menu bar (5-hour session)
 - **Hidden when inactive** - the menu bar item disappears when there's no data, keeping your menu bar clean
-- **Global hotkey** - press `Cmd+Shift+C` to open the menu from anywhere
+- **Configurable global hotkey** - press `Cmd+Shift+C` (customizable in Settings) to open the menu from anywhere
 - **Keyboard shortcuts** - `c` to copy usage, `r` to refresh, `x` to close while the menu is open
-- **Color-coded severity** - optional green/yellow/red coloring based on usage pace relative to session time elapsed
+- **Color-coded severity** - optional 5-level coloring based on usage pace relative to session time elapsed
 - **5-hour session** usage with reset countdown
 - **Weekly limits** with reset date
 - **Sonnet-specific** weekly limit tracking
@@ -26,9 +26,15 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ![Claude Usage Tracker](screenshot.png)
 
-### Demo
+### Demos
 
-![Demo](hover-demo.gif)
+**Keyboard Shortcuts** - use `Cmd+Shift+C` to open the menu, then use `c`, `r`, and `x` for quick actions:
+
+![Keyboard Shortcuts Demo](hover-demo.gif)
+
+**Mouse Navigation** - click the menu bar item to navigate with your mouse:
+
+![Mouse Click Demo](click-demo.gif)
 
 ## Requirements
 
@@ -71,7 +77,13 @@ The usage API is free - no tokens consumed.
 All settings are accessible from the **Settings** submenu:
 
 - **Refresh Interval** - choose between 1 minute, 5 minutes, 30 minutes, or 1 hour
-- **Colors** - toggle color-coded usage items (green = on pace, yellow = moderate, red = heavy usage relative to session time)
+- **Colors** - toggle color-coded usage items with 5 severity levels:
+  - **Green** (≤0.75) - on pace with your session budget
+  - **Yellow** (0.75-1.0) - moderate usage pace
+  - **Light Orange** (1.0-1.5) - elevated usage
+  - **Dark Orange** (1.5-2.5) - heavy usage
+  - **Red** (≥2.5) - very heavy usage relative to time elapsed
+- **Keyboard Shortcut** - customize the global hotkey to open the menu (default: `Cmd+Shift+C`)
 - **Open at Login** - register the app as a login item
 - **Notifications** - configure 100% alerts, usage limit alerts, reset alarms, and notification sounds
 - **More** - pin or unpin usage categories (5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra)
