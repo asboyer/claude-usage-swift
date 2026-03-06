@@ -120,7 +120,7 @@ The OAuth token in your Keychain has expired. To fix:
 
 ## Credits
 
-This project is a fork of [claude-usage-swift](https://github.com/pbnchase/claude-usage-swift) by [pbnchase](https://github.com/pbnchase). The original Python version is available at [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker) by [cfranci](https://github.com/cfranci).
+This project is a fork of [claude-usage-swift](https://github.com/cfranci/claude-usage-swift) by [cfranci](https://github.com/cfranci). The original Python version is available at [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker) by [cfranci](https://github.com/cfranci).
 
 ## License
 
