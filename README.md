@@ -47,6 +47,13 @@ cd claude-usage-swift
 open ClaudeUsage.app
 ```
 
+To keep the app in your Applications folder (optional):
+
+```bash
+cp -r ClaudeUsage.app /Applications/
+open /Applications/ClaudeUsage.app
+```
+
 ## How It Works
 
 The app reads Claude Code's OAuth credentials from macOS Keychain and queries the Anthropic usage API:
@@ -56,6 +63,8 @@ The app reads Claude Code's OAuth credentials from macOS Keychain and queries th
 3. Displays utilization percentages and reset times
 
 The usage API is free - no tokens consumed.
+
+**Important**: You must have **Claude Code running** in order for usage to start being tracked. The app reads your credentials from Claude Code's keychain entry, so Claude Code needs to be installed and logged in.
 
 ## Settings
 
