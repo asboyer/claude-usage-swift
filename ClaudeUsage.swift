@@ -293,6 +293,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // Local key monitor for menu shortcuts (x, c, r) when menu is open
+    var menuKeyMonitor: Any?
+
     // Global hotkey
     var hotKeyRef: EventHotKeyRef?
     var eventHandlerRef: EventHandlerRef?
@@ -493,11 +496,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return mods
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        installMenuKeyMonitor()
+    }
+
     func menuDidClose(_ menu: NSMenu) {
+        uninstallMenuKeyMonitor()
         lastMenuCloseTime = Date()
         if !hasData {
             statusItem.length = 0
             statusItem.button?.title = ""
+        }
+    }
+
+    func installMenuKeyMonitor() {
+        uninstallMenuKeyMonitor()
+        menuKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods.isEmpty else { return event }
+            switch event.keyCode {
+            case UInt16(kVK_ANSI_X):
+                self.closeMenu()
+                return nil
+            case UInt16(kVK_ANSI_C):
+                self.copyUsage()
+                return nil
+            case UInt16(kVK_ANSI_R):
+                self.refresh()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    func uninstallMenuKeyMonitor() {
+        if let monitor = menuKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            menuKeyMonitor = nil
         }
     }
 
@@ -696,6 +733,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let githubItem = NSMenuItem(title: "GitHub", action: #selector(openGitHub), keyEquivalent: "")
         githubItem.target = self
         helpMenu.addItem(githubItem)
+
+        let authorItem = NSMenuItem(title: "Author", action: #selector(openAuthor), keyEquivalent: "")
+        authorItem.target = self
+        helpMenu.addItem(authorItem)
 
         helpMenu.addItem(NSMenuItem.separator())
 
@@ -937,6 +978,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openGitHub() {
         if let url = URL(string: "https://github.com/asboyer/claude-usage-swift") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func openAuthor() {
+        if let url = URL(string: "https://asboyer.com") {
             NSWorkspace.shared.open(url)
         }
     }
