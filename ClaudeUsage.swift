@@ -680,7 +680,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func openGitHub() {
-        if let url = URL(string: "https://github.com/pbnchase/claude-usage-tracker") {
+        if let url = URL(string: "https://github.com/asboyer/claude-usage-swift") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -688,7 +688,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func shareApp() {
         guard let button = statusItem.button else { return }
         let text = "Claude Usage Tracker - a macOS menu bar app that tracks your Claude usage limits"
-        let url = URL(string: "https://github.com/pbnchase/claude-usage-tracker")!
+        let url = URL(string: "https://github.com/asboyer/claude-usage-swift")!
         let picker = NSSharingServicePicker(items: [text, url])
         picker.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
