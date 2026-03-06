@@ -369,6 +369,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(refreshItem)
         menu.addItem(NSMenuItem.separator())
 
+        // Settings submenu — contains Refresh Interval, Notifications, More
+        let settingsMenu = NSMenu()
+
         // Refresh Interval submenu
         let intervalMenu = NSMenu()
         interval1mItem = NSMenuItem(title: "Every 1 minute", action: #selector(setInterval1m), keyEquivalent: "")
@@ -385,7 +388,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         intervalMenu.addItem(interval1hItem)
         let intervalItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         intervalItem.submenu = intervalMenu
-        menu.addItem(intervalItem)
+        settingsMenu.addItem(intervalItem)
 
         // Notifications submenu
         let notifMenu = NSMenu()
@@ -447,7 +450,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let notifItem = NSMenuItem(title: "Notifications", action: nil, keyEquivalent: "")
         notifItem.submenu = notifMenu
-        menu.addItem(notifItem)
+        settingsMenu.addItem(notifItem)
 
         // More submenu — all categories with checkmark = pinned
         moreMenu = NSMenu()
@@ -463,7 +466,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let moreItem = NSMenuItem(title: "More", action: nil, keyEquivalent: "")
         moreItem.submenu = moreMenu
-        menu.addItem(moreItem)
+        settingsMenu.addItem(moreItem)
+
+        let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settingsItem.submenu = settingsMenu
+        menu.addItem(settingsItem)
 
         // Help submenu
         let helpMenu = NSMenu()
