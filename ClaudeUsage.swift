@@ -240,6 +240,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Sound menu items
     var soundItems: [NSMenuItem] = []
 
+    // Colors toggle
+    var colorsEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(colorsEnabled, forKey: "colorsEnabled")
+            colorsItem?.state = colorsEnabled ? .on : .off
+        }
+    }
+    var colorsItem: NSMenuItem!
+
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
         didSet {
@@ -307,6 +316,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alarmSkipIfPrevZero = ud.object(forKey: "alarmSkipIfPrevZero") as? Bool ?? false
         }
         selectedSoundName = ud.object(forKey: "selectedSoundName") as? String ?? "Tink"
+        if ud.object(forKey: "colorsEnabled") != nil {
+            colorsEnabled = ud.bool(forKey: "colorsEnabled")
+        }
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
             pinnedKeys = Set(saved)
@@ -458,6 +470,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let intervalItem = NSMenuItem(title: "Refresh Interval", action: nil, keyEquivalent: "")
         intervalItem.submenu = intervalMenu
         settingsMenu.addItem(intervalItem)
+
+        colorsItem = NSMenuItem(title: "Colors", action: #selector(toggleColors), keyEquivalent: "")
+        colorsItem.target = self
+        colorsItem.state = colorsEnabled ? .on : .off
+        settingsMenu.addItem(colorsItem)
 
         // Notifications submenu
         let notifMenu = NSMenu()
@@ -662,6 +679,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateAlarmMenu()
     }
 
+    @objc func toggleColors() {
+        colorsEnabled = !colorsEnabled
+        // Re-render with colors by triggering a refresh
+        refresh()
+    }
+
     @objc func selectSound(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
         selectedSoundName = name
@@ -746,15 +769,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func tabbedMenuItemString(_ label: String, _ detail: String) -> NSAttributedString {
+    func tabbedMenuItemString(_ label: String, _ detail: String, color: NSColor? = nil) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = [NSTextTab(textAlignment: .left, location: 140, options: [:])]
         let full = "\(label)\t\(detail)"
         return NSAttributedString(string: full, attributes: [
             .paragraphStyle: paragraph,
             .font: NSFont.menuFont(ofSize: 14),
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: color ?? NSColor.labelColor
         ])
+    }
+
+    /// Calculate a green→yellow→red color based on usage pace.
+    /// ratio = usage% / time_elapsed%, where 1.0 means perfectly on track.
+    func severityColor(utilization: Double, resetsAt: String?, windowSeconds: TimeInterval) -> NSColor? {
+        guard colorsEnabled, utilization > 0 else { return nil }
+        if utilization >= 100 { return NSColor(calibratedHue: 0, saturation: 0.8, brightness: 1.0, alpha: 1.0) }
+
+        guard let resetStr = resetsAt,
+              let resetDate = isoFormatter.date(from: resetStr) ?? isoFormatterNoFrac.date(from: resetStr) else {
+            return nil
+        }
+
+        let remaining = max(resetDate.timeIntervalSince(Date()), 0)
+        let elapsed = windowSeconds - remaining
+        let elapsedPct = max(elapsed / windowSeconds * 100, 1)
+        let ratio = utilization / elapsedPct
+
+        // ratio <= 0.8: green, 0.8-1.5: green→yellow, 1.5-2.5: yellow→red, >= 2.5: red
+        let hue: CGFloat
+        if ratio <= 0.8 {
+            hue = 120.0 / 360.0 // green
+        } else if ratio <= 1.5 {
+            // green (120°) → yellow (50°)
+            let t = CGFloat((ratio - 0.8) / 0.7)
+            hue = (120.0 - t * 70.0) / 360.0
+        } else if ratio <= 2.5 {
+            // yellow (50°) → red (0°)
+            let t = CGFloat((ratio - 1.5) / 1.0)
+            hue = (50.0 - t * 50.0) / 360.0
+        } else {
+            hue = 0 // red
+        }
+        return NSColor(calibratedHue: hue, saturation: 0.8, brightness: 1.0, alpha: 1.0)
     }
 
     func dimmedMenuItemString(_ text: String) -> NSAttributedString {
@@ -764,14 +821,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ])
     }
 
-    func updateUsageItem(key: String, limit: UsageLimit?) {
+    func updateUsageItem(key: String, limit: UsageLimit?, windowSeconds: TimeInterval = 0) {
         guard let item = usageItems[key] else { return }
         let label = categoryLabels[key] ?? key
         if let l = limit {
             let pct = Int(l.utilization)
             let reset = l.resets_at.map { formatReset($0) } ?? "--"
             item.title = "\(label): \(pct)% (resets \(reset))"
-            item.attributedTitle = tabbedMenuItemString("\(label): \(pct)%", "resets \(reset)")
+            let color = windowSeconds > 0
+                ? severityColor(utilization: l.utilization, resetsAt: l.resets_at, windowSeconds: windowSeconds)
+                : nil
+            item.attributedTitle = tabbedMenuItemString("\(label): \(pct)%", "resets \(reset)", color: color)
         } else {
             item.title = "\(label): --"
             item.attributedTitle = nil
@@ -789,12 +849,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastFetchDate = Date()
 
         // Update all limit-based categories
-        updateUsageItem(key: "five_hour", limit: usage.five_hour)
-        updateUsageItem(key: "seven_day", limit: usage.seven_day)
-        updateUsageItem(key: "seven_day_opus", limit: usage.seven_day_opus)
-        updateUsageItem(key: "seven_day_sonnet", limit: usage.seven_day_sonnet)
-        updateUsageItem(key: "seven_day_oauth_apps", limit: usage.seven_day_oauth_apps)
-        updateUsageItem(key: "seven_day_cowork", limit: usage.seven_day_cowork)
+        updateUsageItem(key: "five_hour", limit: usage.five_hour, windowSeconds: 5 * 3600)
+        updateUsageItem(key: "seven_day", limit: usage.seven_day, windowSeconds: 7 * 86400)
+        updateUsageItem(key: "seven_day_opus", limit: usage.seven_day_opus, windowSeconds: 7 * 86400)
+        updateUsageItem(key: "seven_day_sonnet", limit: usage.seven_day_sonnet, windowSeconds: 7 * 86400)
+        updateUsageItem(key: "seven_day_oauth_apps", limit: usage.seven_day_oauth_apps, windowSeconds: 7 * 86400)
+        updateUsageItem(key: "seven_day_cowork", limit: usage.seven_day_cowork, windowSeconds: 7 * 86400)
 
         // Extra usage (special format)
         if let e = usage.extra_usage, e.is_enabled,
