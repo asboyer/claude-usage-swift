@@ -1,4 +1,5 @@
 import Cocoa
+import Carbon.HIToolbox
 
 // MARK: - Constants
 
@@ -192,7 +193,7 @@ func playAlarmBursts(bursts: Int = 3, clicksPerBurst: Int = 5, soundName: String
 
 // MARK: - App Delegate
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     var menu: NSMenu!
     var timer: Timer?
@@ -270,6 +271,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Global hotkey
+    var hotKeyRef: EventHotKeyRef?
+    var lastMenuCloseTime: Date = .distantPast
+
     // Transition tracking
     var previousFiveHourUtil: Double = -1
     var previousExtraUtil: Double = -1
@@ -319,6 +324,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Build the full menu
         menu = NSMenu()
+        menu.delegate = self
         buildMenu()
         menuReady = true
 
@@ -337,12 +343,54 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start timer
         restartTimer()
 
+        // Register global hotkey: Cmd+Shift+C via Carbon
+        registerGlobalHotkey()
+
         // Subscribe to sleep/wake notifications
         let wsnc = NSWorkspace.shared.notificationCenter
         wsnc.addObserver(self, selector: #selector(handleSleep), name: NSWorkspace.willSleepNotification, object: nil)
         wsnc.addObserver(self, selector: #selector(handleWake), name: NSWorkspace.didWakeNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(handleSleep), name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(handleWake), name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+    }
+
+    // MARK: - Global Hotkey
+
+    func registerGlobalHotkey() {
+        let hotKeyID = EventHotKeyID(signature: OSType(0x434C5553), id: 1) // "CLUS"
+        var eventType = EventTypeSpec(eventClass: UInt32(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+
+        let status = InstallEventHandler(GetApplicationEventTarget(), { (_, event, _) -> OSStatus in
+            let app = NSApplication.shared.delegate as! AppDelegate
+            // Ignore queued hotkey events that fired while menu was open
+            if Date().timeIntervalSince(app.lastMenuCloseTime) > 0.5 {
+                app.showMenu()
+            }
+            return noErr
+        }, 1, &eventType, nil, nil)
+
+        guard status == noErr else { return }
+
+        // Cmd+Shift+C: kVK_ANSI_C = 8, cmdKey | shiftKey
+        let modifiers: UInt32 = UInt32(cmdKey | shiftKey)
+        RegisterEventHotKey(UInt32(kVK_ANSI_C), modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        lastMenuCloseTime = Date()
+    }
+
+    @objc func closeMenu() {
+        menu.cancelTracking()
+    }
+
+    func showMenu() {
+        guard let button = statusItem.button else { return }
+        if needsMenuRebuild {
+            rebuildMenu()
+            needsMenuRebuild = false
+        }
+        button.performClick(nil)
     }
 
     // MARK: - Menu Building
@@ -362,10 +410,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
         copyItem.target = self
+        copyItem.keyEquivalentModifierMask = []
         menu.addItem(copyItem)
+
+        let closeItem = NSMenuItem(title: "Close", action: #selector(closeMenu), keyEquivalent: "x")
+        closeItem.target = self
+        closeItem.keyEquivalentModifierMask = []
+        menu.addItem(closeItem)
 
         let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
+        refreshItem.keyEquivalentModifierMask = []
         menu.addItem(refreshItem)
         menu.addItem(NSMenuItem.separator())
 
