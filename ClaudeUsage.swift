@@ -1,6 +1,9 @@
 import Cocoa
 import Carbon.HIToolbox
+import Security
 import ServiceManagement
+import SQLite3
+import CommonCrypto
 
 // MARK: - Constants
 
@@ -31,7 +34,7 @@ private let dateFormatter: DateFormatter = {
     return f
 }()
 
-// MARK: - Usage API
+// MARK: - Usage API (OAuth + Claude Desktop cookies)
 
 private let userAgents: [String] = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -84,6 +87,185 @@ struct APIErrorResponse: Codable {
     }
 }
 
+// MARK: - Claude Desktop cookie-based usage (claude-web-usage strategy)
+
+private func getClaudeDesktopEncryptionKey() -> Data? {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "Claude Safe Storage",
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+          let passwordData = result as? Data,
+          !passwordData.isEmpty else {
+        return nil
+    }
+
+    // Chromium-style PBKDF2(password, "saltysalt", 1003, 16, SHA1)
+    let saltData = "saltysalt".data(using: .utf8)!
+    var derivedKey = Data(repeating: 0, count: 16)
+    let keyLength = derivedKey.count
+
+    let resultCode = derivedKey.withUnsafeMutableBytes { derivedBytes -> Int32 in
+        saltData.withUnsafeBytes { saltBytes -> Int32 in
+            passwordData.withUnsafeBytes { passwordBytes -> Int32 in
+                CCKeyDerivationPBKDF(
+                    CCPBKDFAlgorithm(kCCPBKDF2),
+                    passwordBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    passwordData.count,
+                    saltBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    saltData.count,
+                    CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
+                    1003,
+                    derivedBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    keyLength
+                )
+            }
+        }
+    }
+
+    guard resultCode == kCCSuccess else { return nil }
+    return derivedKey
+}
+
+private func decryptClaudeCookie(_ encrypted: Data, key: Data) -> String? {
+    // Expect Chromium "v10" prefix
+    guard encrypted.count > 3,
+          String(data: encrypted.prefix(3), encoding: .utf8) == "v10" else {
+        return nil
+    }
+    let data = encrypted.dropFirst(3)
+
+    var outData = Data(count: data.count + kCCBlockSizeAES128)
+    let outCapacity = outData.count
+    var outLength: size_t = 0
+
+    let iv = Data(repeating: 0x20, count: 16)
+
+    let status = key.withUnsafeBytes { keyBytes in
+        data.withUnsafeBytes { dataBytes in
+            iv.withUnsafeBytes { ivBytes in
+                outData.withUnsafeMutableBytes { outBytes in
+                    CCCrypt(
+                        CCOperation(kCCDecrypt),
+                        CCAlgorithm(kCCAlgorithmAES128),
+                        CCOptions(kCCOptionPKCS7Padding),
+                        keyBytes.bindMemory(to: UInt8.self).baseAddress!,
+                        key.count,
+                        ivBytes.bindMemory(to: UInt8.self).baseAddress!,
+                        dataBytes.bindMemory(to: UInt8.self).baseAddress!,
+                        data.count,
+                        outBytes.bindMemory(to: UInt8.self).baseAddress!,
+                        outCapacity,
+                        &outLength
+                    )
+                }
+            }
+        }
+    }
+
+    guard status == kCCSuccess else { return nil }
+    outData.removeSubrange(outLength..<outData.count)
+
+    // Strip 32-byte prefix; remaining UTF-8 string is the cookie value.
+    guard outData.count > 32 else { return nil }
+    let valueData = outData.dropFirst(32)
+    return String(data: valueData, encoding: .utf8)
+}
+
+private func getClaudeCookie(name: String, key: Data) -> String? {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let dbURL = home
+        .appendingPathComponent("Library")
+        .appendingPathComponent("Application Support")
+        .appendingPathComponent("Claude")
+        .appendingPathComponent("Cookies")
+
+    var db: OpaquePointer?
+    guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else { return nil }
+    defer { sqlite3_close(db) }
+
+    let query = "SELECT encrypted_value FROM cookies WHERE host_key = '.claude.ai' AND name = '\(name)' LIMIT 1;"
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
+    defer { sqlite3_finalize(stmt) }
+
+    if sqlite3_step(stmt) == SQLITE_ROW {
+        if let blobPtr = sqlite3_column_blob(stmt, 0) {
+            let size = Int(sqlite3_column_bytes(stmt, 0))
+            let data = Data(bytes: blobPtr, count: size)
+            return decryptClaudeCookie(data, key: key)
+        }
+    }
+    return nil
+}
+
+func fetchUsageViaClaudeDesktopCookies(completion: @escaping (UsageResponse?) -> Void) {
+    guard let key = getClaudeDesktopEncryptionKey() else {
+        completion(nil)
+        return
+    }
+    guard let sessionKey = getClaudeCookie(name: "sessionKey", key: key),
+          let orgId = getClaudeCookie(name: "lastActiveOrg", key: key) else {
+        completion(nil)
+        return
+    }
+
+    guard let url = URL(string: "https://claude.ai/api/organizations/\(orgId)/usage") else {
+        completion(nil)
+        return
+    }
+
+    var request = URLRequest(url: url)
+    request.setValue("sessionKey=\(sessionKey); lastActiveOrg=\(orgId)", forHTTPHeaderField: "Cookie")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
+
+    // Debug Mode: record a sanitized request description
+    let requestDict: [String: Any] = [
+        "url": url.absoluteString,
+        "method": "GET",
+        "headers": [
+            "Cookie": "sessionKey=***; lastActiveOrg=\(orgId)",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        ]
+    ]
+    if let reqData = try? JSONSerialization.data(withJSONObject: requestDict, options: [.prettyPrinted]) {
+        lastRequestForDebug = String(data: reqData, encoding: .utf8)
+    }
+
+    let session = URLSession(configuration: .ephemeral)
+    session.dataTask(with: request) { data, response, _ in
+        guard let data = data else {
+            completion(nil)
+            return
+        }
+        if let obj = try? JSONSerialization.jsonObject(with: data),
+           let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+           let s = String(data: pretty, encoding: .utf8) {
+            lastResponseForDebug = s
+        } else {
+            lastResponseForDebug = String(data: data, encoding: .utf8)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            completion(nil)
+            return
+        }
+        // Treat 2xx as success; anything else as failure (no special rate-limit UI here).
+        guard (200..<300).contains(http.statusCode),
+              let usage = try? JSONDecoder().decode(UsageResponse.self, from: data) else {
+            completion(nil)
+            return
+        }
+        completion(usage)
+    }.resume()
+}
+
 // All trackable usage categories
 let allCategoryKeys: [String] = [
     "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet",
@@ -101,30 +283,24 @@ let categoryLabels: [String: String] = [
 let defaultPinnedKeys: Set<String> = ["five_hour", "seven_day", "seven_day_sonnet", "extra_usage"]
 
 func getOAuthToken() -> String? {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-    task.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
-
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.standardError = FileHandle.nullDevice
-
-    do {
-        try task.run()
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let jsonData = json.data(using: .utf8),
-              let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let oauth = creds["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String else {
-            return nil
-        }
-        return token
-    } catch {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "Claude Code-credentials",
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+          let data = result as? Data,
+          let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          let jsonData = json.data(using: .utf8),
+          let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+          let oauth = creds["claudeAiOauth"] as? [String: Any],
+          let token = oauth["accessToken"] as? String else {
         return nil
     }
+    return token
 }
 
 func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimited: Bool) -> Void) {
@@ -317,6 +493,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var openAtLoginItem: NSMenuItem!
 
+    // Usage source: 0 = Desktop cookies (default), 1 = OAuth API
+    var usageSource: Int = 0 {
+        didSet {
+            UserDefaults.standard.set(usageSource, forKey: "usageSource")
+            updateUsageSourceMenu()
+        }
+    }
+    var usageSourceCookiesItem: NSMenuItem!
+    var usageSourceOAuthItem: NSMenuItem!
+
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
         didSet {
@@ -399,6 +585,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ud.object(forKey: "openAtLoginEnabled") != nil {
             openAtLoginEnabled = ud.bool(forKey: "openAtLoginEnabled")
         }
+        if ud.object(forKey: "usageSource") != nil {
+            usageSource = ud.integer(forKey: "usageSource")
+        } else {
+            usageSource = 0 // default: Desktop cookies
+        }
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
             pinnedKeys = Set(saved)
@@ -433,6 +624,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateNotificationMenu()
         updateAlarmMenu()
         updateSoundMenu()
+        updateUsageSourceMenu()
 
         // Initial fetch
         refresh()
@@ -674,6 +866,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openAtLoginItem.state = openAtLoginEnabled ? .on : .off
         settingsMenu.addItem(openAtLoginItem)
 
+        // Usage Source submenu
+        let usageSourceMenu = NSMenu()
+        usageSourceCookiesItem = NSMenuItem(title: "Use Desktop Cookies (recommended)", action: #selector(selectUsageSourceCookies), keyEquivalent: "")
+        usageSourceCookiesItem.target = self
+        usageSourceMenu.addItem(usageSourceCookiesItem)
+        usageSourceOAuthItem = NSMenuItem(title: "Use OAuth API", action: #selector(selectUsageSourceOAuth), keyEquivalent: "")
+        usageSourceOAuthItem.target = self
+        usageSourceMenu.addItem(usageSourceOAuthItem)
+        let usageSourceItem = NSMenuItem(title: "Usage Source", action: nil, keyEquivalent: "")
+        usageSourceItem.submenu = usageSourceMenu
+        settingsMenu.addItem(usageSourceItem)
+
         // Keyboard Shortcut submenu
         let hotkeyMenu = NSMenu()
         hotkeyCurrentItem = NSMenuItem(title: "Current: \(hotkeyDisplayString())", action: nil, keyEquivalent: "")
@@ -878,6 +1082,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func updateUsageSourceMenu() {
+        usageSourceCookiesItem?.state = usageSource == 0 ? .on : .off
+        usageSourceOAuthItem?.state = usageSource == 1 ? .on : .off
+    }
+
     func restartTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -1002,6 +1211,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openAtLoginEnabled = !openAtLoginEnabled
     }
 
+    @objc func selectUsageSourceCookies() {
+        usageSource = 0
+    }
+
+    @objc func selectUsageSourceOAuth() {
+        usageSource = 1
+    }
+
     func updateLoginItem() {
         if #available(macOS 13.0, *) {
             do {
@@ -1109,17 +1326,47 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let token = getOAuthToken() else {
-                DispatchQueue.main.async {
-                    self?.hasData = false
-                    self?.statusItem.button?.title = "..."
-                }
-                return
-            }
+            guard let strongSelf = self else { return }
+            let source = strongSelf.usageSource
 
-            fetchUsage(token: token) { usage, rateLimited in
-                DispatchQueue.main.async {
-                    self?.updateUI(usage: usage, rateLimited: rateLimited)
+            if source == 0 {
+                // Prefer Claude Desktop cookie-based usage API when available, with OAuth fallback.
+                fetchUsageViaClaudeDesktopCookies { usage in
+                    if let usage = usage {
+                        DispatchQueue.main.async {
+                            self?.updateUI(usage: usage, rateLimited: false)
+                        }
+                        return
+                    }
+
+                    guard let token = getOAuthToken() else {
+                        DispatchQueue.main.async {
+                            self?.hasData = false
+                            self?.statusItem.button?.title = "..."
+                        }
+                        return
+                    }
+
+                    fetchUsage(token: token) { usage, rateLimited in
+                        DispatchQueue.main.async {
+                            self?.updateUI(usage: usage, rateLimited: rateLimited)
+                        }
+                    }
+                }
+            } else {
+                // OAuth only
+                guard let token = getOAuthToken() else {
+                    DispatchQueue.main.async {
+                        self?.hasData = false
+                        self?.statusItem.button?.title = "..."
+                    }
+                    return
+                }
+
+                fetchUsage(token: token) { usage, rateLimited in
+                    DispatchQueue.main.async {
+                        self?.updateUI(usage: usage, rateLimited: rateLimited)
+                    }
                 }
             }
         }
