@@ -11,7 +11,7 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 - **Live usage percentage** in menu bar (5-hour session)
 - **Two ways to fetch usage** — **Desktop cookies** (recommended) or **OAuth API**, selectable in Settings; Desktop cookies use Claude Desktop’s web session and avoid the OAuth usage API rate limits
 - **Rate limit handling** — when the OAuth usage API returns 429, the menu shows a red “Rate limited. Try again later.” message above the “Updated” line
-- **Configurable global hotkey** — press `Cmd+Shift+C` (customizable in Settings) to open the menu from anywhere
+- **Configurable global hotkey** — press `Cmd+Shift+X` (customizable in Settings) to open the menu from anywhere
 - **Keyboard shortcuts** — `c` to copy usage, `r` to refresh, `x` to close while the menu is open
 - **Color-coded severity** — optional 5-level coloring based on usage pace relative to session time elapsed
 - **5-hour session** usage with reset countdown
@@ -30,7 +30,7 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ### Demos
 
-**Keyboard Shortcuts** - use `Cmd+Shift+C` to open the menu, then use `c`, `r`, and `x` for quick actions:
+**Keyboard Shortcuts** — use `Cmd+Shift+X` to open the menu, then `c` to copy, `r` to refresh, and `x` to close. (Default was changed from `Cmd+Shift+C` to avoid conflicting with iTerm2’s copy mode and to pair open/close: **X** opens the menu, **x** closes it.)
 
 ![Keyboard Shortcuts Demo](hover-demo.gif)
 
@@ -105,7 +105,7 @@ All settings are accessible from the **Settings** submenu:
   - **Light Orange** (1.0–1.5) — elevated usage
   - **Dark Orange** (1.5–2.5) — heavy usage
   - **Red** — very heavy usage relative to time elapsed, or 100% utilization
-- **Keyboard Shortcut** — global hotkey to open the menu (default: `Cmd+Shift+C`)
+- **Keyboard Shortcut** — global hotkey to open the menu (default: `Cmd+Shift+X`)
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **More** — pin or unpin categories (5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra)
