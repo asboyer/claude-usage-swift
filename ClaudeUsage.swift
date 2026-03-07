@@ -113,7 +113,7 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?) -> Void) {
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("claude-code/\(appVersion)", forHTTPHeaderField: "User-Agent")
+    request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
 
     let session = URLSession(configuration: .ephemeral)
     session.dataTask(with: request) { data, _, _ in
@@ -348,8 +348,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Create status item
-        statusItem = NSStatusBar.system.statusItem(withLength: 0)
-        statusItem.button?.title = ""
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.title = "..."
 
         // Create usage menu items for all categories
         for key in allCategoryKeys {
@@ -504,8 +504,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         uninstallMenuKeyMonitor()
         lastMenuCloseTime = Date()
         if !hasData {
-            statusItem.length = 0
-            statusItem.button?.title = ""
+            statusItem.button?.title = "..."
         }
     }
 
@@ -549,11 +548,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if needsMenuRebuild {
             rebuildMenu()
             needsMenuRebuild = false
-        }
-        // Temporarily make visible if hidden so the menu can anchor
-        if statusItem.length == 0 {
-            statusItem.length = NSStatusItem.variableLength
-            button.title = hasData ? currentPct : "..."
         }
         button.performClick(nil)
     }
@@ -1013,16 +1007,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func refresh() {
         if !hasData {
-            statusItem.length = 0
-            statusItem.button?.title = ""
+            statusItem.button?.title = "..."
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let token = getOAuthToken() else {
                 DispatchQueue.main.async {
                     self?.hasData = false
-                    self?.statusItem.length = 0
-                    self?.statusItem.button?.title = ""
+                    self?.statusItem.button?.title = "..."
                 }
                 return
             }
@@ -1062,20 +1054,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let elapsedPct = max(elapsed / windowSeconds * 100, 1)
         let ratio = utilization / elapsedPct
 
-        // ratio <= 0.75: green, 0.75-1.0: yellow, 1.0-1.5: light orange, 1.5-2.5: dark orange, >= 2.5: red
+        // High utilization + on-track burn → red (e.g. 99% with 2hrs left). Low utilization → cap at orange (e.g. 11% weekly).
+        let effectiveRatio: Double
+        if utilization < 20 {
+            effectiveRatio = min(ratio, 2.5)
+        } else {
+            effectiveRatio = ratio
+        }
+
+        // effectiveRatio <= 0.75: green, 0.75-1.0: yellow, 1.0-1.5: light orange, 1.5-2.5: dark orange. Red: (effectiveRatio >= 2.5 and utilization >= 20) OR (high utilization and ratio >= 1.0).
         let hue: CGFloat
         let saturation: CGFloat
         let brightness: CGFloat
-        if ratio <= 0.75 {
+        let useRed = (effectiveRatio >= 2.5 && utilization >= 20) || (utilization >= 85 && ratio >= 1.0)
+        if useRed {
+            hue = 0; saturation = 0.8; brightness = 1.0
+        } else if effectiveRatio <= 0.75 {
             hue = 120.0 / 360.0; saturation = 0.8; brightness = 1.0           // green
-        } else if ratio <= 1.0 {
-            hue = 55.0 / 360.0; saturation = 0.85; brightness = 1.0           // yellow
-        } else if ratio <= 1.5 {
+        } else if effectiveRatio <= 1.0 {
+            hue = 55.0 / 360.0; saturation = 0.85; brightness = 1.0         // yellow
+        } else if effectiveRatio <= 1.5 {
             hue = 35.0 / 360.0; saturation = 0.8; brightness = 1.0            // light orange
-        } else if ratio <= 2.5 {
-            hue = 20.0 / 360.0; saturation = 0.9; brightness = 0.9            // dark orange
         } else {
-            hue = 0; saturation = 0.8; brightness = 1.0                        // red
+            hue = 20.0 / 360.0; saturation = 0.9; brightness = 0.9            // dark orange
         }
         return NSColor(calibratedHue: hue, saturation: saturation, brightness: brightness, alpha: 1.0)
     }
@@ -1107,8 +1108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func updateUI(usage: UsageResponse?) {
         guard let usage = usage else {
             hasData = false
-            statusItem.length = 0
-            statusItem.button?.title = ""
+            statusItem.button?.title = "..."
             return
         }
 
