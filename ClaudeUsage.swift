@@ -33,6 +33,15 @@ private let dateFormatter: DateFormatter = {
 
 // MARK: - Usage API
 
+private let userAgents: [String] = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "curl/8.4.0"
+]
+private var userAgentIndex = 0
+
 struct UsageResponse: Codable {
     let five_hour: UsageLimit?
     let seven_day: UsageLimit?
@@ -118,10 +127,13 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimi
         return
     }
 
+    userAgentIndex = (userAgentIndex + 1) % userAgents.count
+    let userAgent = userAgents[userAgentIndex]
+
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
     let session = URLSession(configuration: .ephemeral)
     session.dataTask(with: request) { data, _, _ in
