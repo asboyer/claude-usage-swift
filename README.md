@@ -114,31 +114,38 @@ All settings are accessible from the **Settings** submenu:
 ## Troubleshooting
 
 ### Menu bar shows "..." or no data
+
 - **Desktop cookies (default)**: Ensure [Claude Desktop](https://claude.ai/download) is installed and you’ve logged in to claude.ai at least once so cookies exist. The app does not need to be running.
 - **OAuth API**: Ensure [Claude Code](https://claude.ai/code) is installed and logged in; run `claude` in terminal to confirm.
 - Try **Settings → Usage Source → Use Desktop Cookies (recommended)** if you’re getting persistent “Rate limited” with OAuth.
 
 ### "Rate limited. Try again later." in red
+
 The OAuth usage API (`api.anthropic.com/api/oauth/usage`) is returning 429. Switch to **Settings → Usage Source → Use Desktop Cookies (recommended)** so the app uses Claude Desktop’s web session and a different rate limit bucket.
 
 ### Keychain access prompt
+
 The app may ask for access to Keychain items **Claude Code-credentials** (OAuth) and/or **Claude Safe Storage** (Claude Desktop cookies). Choose **Allow** or **Always Allow** so it can read usage. Access is attributed to **ClaudeUsage** (the app), not the `security` CLI. To revoke later: Keychain Access → find the item → Access Control → remove ClaudeUsage.
 
 ### Usage shows 0% or doesn't update
+
 - **Desktop cookies**: Open Claude Desktop and log in to claude.ai so cookies are present (and not expired).
 - **OAuth**: Run `claude` in terminal; if your token expired, run `claude setup-token` and restart the app.
 - **API key users**: This app tracks subscription usage; it requires Pro or Max and does not use API credits.
 
 ### OAuth token has expired (OAuth mode only)
+
 1. Delete old credentials: `security delete-generic-password -s "Claude Code-credentials"`
 2. Run `claude setup-token` to get a fresh token
 3. Restart the app
 
 ### App won't open (macOS security)
+
 - Go to **System Settings → Privacy & Security**
 - Find "ClaudeUsage was blocked" and click **Open Anyway**
 
 ### Building fails
+
 - Ensure Xcode Command Line Tools: `xcode-select --install`
 
 ## Credits
