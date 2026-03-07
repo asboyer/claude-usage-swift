@@ -493,6 +493,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var openAtLoginItem: NSMenuItem!
 
+    // Usage source: 0 = Desktop cookies (default), 1 = OAuth API
+    var usageSource: Int = 0 {
+        didSet {
+            UserDefaults.standard.set(usageSource, forKey: "usageSource")
+            updateUsageSourceMenu()
+        }
+    }
+    var usageSourceCookiesItem: NSMenuItem!
+    var usageSourceOAuthItem: NSMenuItem!
+
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
         didSet {
@@ -575,6 +585,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ud.object(forKey: "openAtLoginEnabled") != nil {
             openAtLoginEnabled = ud.bool(forKey: "openAtLoginEnabled")
         }
+        if ud.object(forKey: "usageSource") != nil {
+            usageSource = ud.integer(forKey: "usageSource")
+        } else {
+            usageSource = 0 // default: Desktop cookies
+        }
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
             pinnedKeys = Set(saved)
@@ -609,6 +624,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateNotificationMenu()
         updateAlarmMenu()
         updateSoundMenu()
+        updateUsageSourceMenu()
 
         // Initial fetch
         refresh()
@@ -850,6 +866,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openAtLoginItem.state = openAtLoginEnabled ? .on : .off
         settingsMenu.addItem(openAtLoginItem)
 
+        // Usage Source submenu
+        let usageSourceMenu = NSMenu()
+        usageSourceCookiesItem = NSMenuItem(title: "Use Desktop Cookies (recommended)", action: #selector(selectUsageSourceCookies), keyEquivalent: "")
+        usageSourceCookiesItem.target = self
+        usageSourceMenu.addItem(usageSourceCookiesItem)
+        usageSourceOAuthItem = NSMenuItem(title: "Use OAuth API", action: #selector(selectUsageSourceOAuth), keyEquivalent: "")
+        usageSourceOAuthItem.target = self
+        usageSourceMenu.addItem(usageSourceOAuthItem)
+        let usageSourceItem = NSMenuItem(title: "Usage Source", action: nil, keyEquivalent: "")
+        usageSourceItem.submenu = usageSourceMenu
+        settingsMenu.addItem(usageSourceItem)
+
         // Keyboard Shortcut submenu
         let hotkeyMenu = NSMenu()
         hotkeyCurrentItem = NSMenuItem(title: "Current: \(hotkeyDisplayString())", action: nil, keyEquivalent: "")
@@ -1054,6 +1082,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func updateUsageSourceMenu() {
+        usageSourceCookiesItem?.state = usageSource == 0 ? .on : .off
+        usageSourceOAuthItem?.state = usageSource == 1 ? .on : .off
+    }
+
     func restartTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -1178,6 +1211,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openAtLoginEnabled = !openAtLoginEnabled
     }
 
+    @objc func selectUsageSourceCookies() {
+        usageSource = 0
+    }
+
+    @objc func selectUsageSourceOAuth() {
+        usageSource = 1
+    }
+
     func updateLoginItem() {
         if #available(macOS 13.0, *) {
             do {
@@ -1285,15 +1326,35 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Prefer Claude Desktop cookie-based usage API when available, falling back to OAuth usage.
-            fetchUsageViaClaudeDesktopCookies { usage in
-                if let usage = usage {
-                    DispatchQueue.main.async {
-                        self?.updateUI(usage: usage, rateLimited: false)
-                    }
-                    return
-                }
+            guard let strongSelf = self else { return }
+            let source = strongSelf.usageSource
 
+            if source == 0 {
+                // Prefer Claude Desktop cookie-based usage API when available, with OAuth fallback.
+                fetchUsageViaClaudeDesktopCookies { usage in
+                    if let usage = usage {
+                        DispatchQueue.main.async {
+                            self?.updateUI(usage: usage, rateLimited: false)
+                        }
+                        return
+                    }
+
+                    guard let token = getOAuthToken() else {
+                        DispatchQueue.main.async {
+                            self?.hasData = false
+                            self?.statusItem.button?.title = "..."
+                        }
+                        return
+                    }
+
+                    fetchUsage(token: token) { usage, rateLimited in
+                        DispatchQueue.main.async {
+                            self?.updateUI(usage: usage, rateLimited: rateLimited)
+                        }
+                    }
+                }
+            } else {
+                // OAuth only
                 guard let token = getOAuthToken() else {
                     DispatchQueue.main.async {
                         self?.hasData = false
