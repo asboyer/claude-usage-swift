@@ -1,5 +1,6 @@
 import Cocoa
 import Carbon.HIToolbox
+import Security
 import ServiceManagement
 import SQLite3
 import CommonCrypto
@@ -89,51 +90,45 @@ struct APIErrorResponse: Codable {
 // MARK: - Claude Desktop cookie-based usage (claude-web-usage strategy)
 
 private func getClaudeDesktopEncryptionKey() -> Data? {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-    task.arguments = ["find-generic-password", "-s", "Claude Safe Storage", "-w"]
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "Claude Safe Storage",
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+          let passwordData = result as? Data,
+          !passwordData.isEmpty else {
+        return nil
+    }
 
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.standardError = FileHandle.nullDevice
+    // Chromium-style PBKDF2(password, "saltysalt", 1003, 16, SHA1)
+    let saltData = "saltysalt".data(using: .utf8)!
+    var derivedKey = Data(repeating: 0, count: 16)
+    let keyLength = derivedKey.count
 
-    do {
-        try task.run()
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let password = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !password.isEmpty else {
-            return nil
-        }
-
-        // Chromium-style PBKDF2(key, "saltysalt", 1003, 16, SHA1)
-        let saltData = "saltysalt".data(using: .utf8)!
-        var derivedKey = Data(repeating: 0, count: 16)
-
-        let passwordCString = password.cString(using: .utf8)!
-        let result = derivedKey.withUnsafeMutableBytes { derivedBytes -> Int32 in
-            saltData.withUnsafeBytes { saltBytes -> Int32 in
+    let resultCode = derivedKey.withUnsafeMutableBytes { derivedBytes -> Int32 in
+        saltData.withUnsafeBytes { saltBytes -> Int32 in
+            passwordData.withUnsafeBytes { passwordBytes -> Int32 in
                 CCKeyDerivationPBKDF(
                     CCPBKDFAlgorithm(kCCPBKDF2),
-                    passwordCString,
-                    passwordCString.count - 1,
+                    passwordBytes.bindMemory(to: UInt8.self).baseAddress!,
+                    passwordData.count,
                     saltBytes.bindMemory(to: UInt8.self).baseAddress!,
                     saltData.count,
                     CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
                     1003,
                     derivedBytes.bindMemory(to: UInt8.self).baseAddress!,
-                    derivedKey.count
+                    keyLength
                 )
             }
         }
-
-        guard result == kCCSuccess else { return nil }
-        return derivedKey
-    } catch {
-        return nil
     }
+
+    guard resultCode == kCCSuccess else { return nil }
+    return derivedKey
 }
 
 private func decryptClaudeCookie(_ encrypted: Data, key: Data) -> String? {
@@ -145,6 +140,7 @@ private func decryptClaudeCookie(_ encrypted: Data, key: Data) -> String? {
     let data = encrypted.dropFirst(3)
 
     var outData = Data(count: data.count + kCCBlockSizeAES128)
+    let outCapacity = outData.count
     var outLength: size_t = 0
 
     let iv = Data(repeating: 0x20, count: 16)
@@ -163,7 +159,7 @@ private func decryptClaudeCookie(_ encrypted: Data, key: Data) -> String? {
                         dataBytes.bindMemory(to: UInt8.self).baseAddress!,
                         data.count,
                         outBytes.bindMemory(to: UInt8.self).baseAddress!,
-                        outData.count,
+                        outCapacity,
                         &outLength
                     )
                 }
@@ -287,30 +283,24 @@ let categoryLabels: [String: String] = [
 let defaultPinnedKeys: Set<String> = ["five_hour", "seven_day", "seven_day_sonnet", "extra_usage"]
 
 func getOAuthToken() -> String? {
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-    task.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
-
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.standardError = FileHandle.nullDevice
-
-    do {
-        try task.run()
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let jsonData = json.data(using: .utf8),
-              let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let oauth = creds["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String else {
-            return nil
-        }
-        return token
-    } catch {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "Claude Code-credentials",
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+          let data = result as? Data,
+          let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          let jsonData = json.data(using: .utf8),
+          let creds = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+          let oauth = creds["claudeAiOauth"] as? [String: Any],
+          let token = oauth["accessToken"] as? String else {
         return nil
     }
+    return token
 }
 
 func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimited: Bool) -> Void) {
