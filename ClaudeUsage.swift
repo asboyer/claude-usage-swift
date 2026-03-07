@@ -348,8 +348,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Create status item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.isVisible = false
+        statusItem = NSStatusBar.system.statusItem(withLength: 0)
         statusItem.button?.title = ""
 
         // Create usage menu items for all categories
@@ -505,7 +504,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         uninstallMenuKeyMonitor()
         lastMenuCloseTime = Date()
         if !hasData {
-            statusItem.isVisible = false
+            statusItem.length = 0
+            statusItem.button?.title = ""
         }
     }
 
@@ -551,8 +551,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             needsMenuRebuild = false
         }
         // Temporarily make visible if hidden so the menu can anchor
-        if !statusItem.isVisible {
-            statusItem.isVisible = true
+        if statusItem.length == 0 {
+            statusItem.length = NSStatusItem.variableLength
             button.title = hasData ? currentPct : "..."
         }
         button.performClick(nil)
@@ -1013,14 +1013,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func refresh() {
         if !hasData {
-            statusItem.isVisible = false
+            statusItem.length = 0
+            statusItem.button?.title = ""
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let token = getOAuthToken() else {
                 DispatchQueue.main.async {
                     self?.hasData = false
-                    self?.statusItem.isVisible = false
+                    self?.statusItem.length = 0
+                    self?.statusItem.button?.title = ""
                 }
                 return
             }
@@ -1105,7 +1107,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func updateUI(usage: UsageResponse?) {
         guard let usage = usage else {
             hasData = false
-            statusItem.isVisible = false
+            statusItem.length = 0
+            statusItem.button?.title = ""
             return
         }
 
@@ -1172,11 +1175,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             hasData = true
-            statusItem.isVisible = true
+            statusItem.length = NSStatusItem.variableLength
             statusItem.button?.title = currentPct
-        } else {
-            hasData = false
-            statusItem.isVisible = false
         }
 
         // Extra usage transition detection
