@@ -42,6 +42,10 @@ private let userAgents: [String] = [
 ]
 private var userAgentIndex = 0
 
+/// Last request/response from fetchUsage for Debug Mode copy (formatted JSON, indent 4).
+var lastRequestForDebug: String?
+var lastResponseForDebug: String?
+
 struct UsageResponse: Codable {
     let five_hour: UsageLimit?
     let seven_day: UsageLimit?
@@ -135,11 +139,31 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimi
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
     request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
+    let requestDict: [String: Any] = [
+        "url": url.absoluteString,
+        "method": "GET",
+        "headers": [
+            "Authorization": "Bearer ***",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": userAgent
+        ]
+    ]
+    if let reqData = try? JSONSerialization.data(withJSONObject: requestDict, options: [.prettyPrinted]) {
+        lastRequestForDebug = String(data: reqData, encoding: .utf8)
+    }
+
     let session = URLSession(configuration: .ephemeral)
     session.dataTask(with: request) { data, _, _ in
         guard let data = data else {
             completion(nil, false)
             return
+        }
+        if let obj = try? JSONSerialization.jsonObject(with: data),
+           let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+           let s = String(data: pretty, encoding: .utf8) {
+            lastResponseForDebug = s
+        } else {
+            lastResponseForDebug = String(data: data, encoding: .utf8)
         }
         if let errorResponse = try? JSONDecoder().decode(APIErrorResponse.self, from: data),
            errorResponse.error?.type == "rate_limit_error" {
@@ -742,6 +766,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         moreItem.submenu = moreMenu
         settingsMenu.addItem(moreItem)
 
+        // Debug Mode submenu — copy latest request/response as formatted JSON
+        let debugMenu = NSMenu()
+        let debugRequestItem = NSMenuItem(title: "Request", action: #selector(copyDebugRequest), keyEquivalent: "")
+        debugRequestItem.target = self
+        debugMenu.addItem(debugRequestItem)
+        let debugResponseItem = NSMenuItem(title: "Response", action: #selector(copyDebugResponse), keyEquivalent: "")
+        debugResponseItem.target = self
+        debugMenu.addItem(debugResponseItem)
+        let debugItem = NSMenuItem(title: "Debug Mode", action: nil, keyEquivalent: "")
+        debugItem.submenu = debugMenu
+        settingsMenu.addItem(debugItem)
+
         let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
@@ -1030,6 +1066,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let text = (lines + [updatedItem.title]).joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc func copyDebugRequest() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastRequestForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyDebugResponse() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastResponseForDebug ?? "", forType: .string)
     }
 
     @objc func quit() {
