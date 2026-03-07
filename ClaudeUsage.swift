@@ -42,9 +42,11 @@ private let userAgents: [String] = [
 ]
 private var userAgentIndex = 0
 
-/// Last request/response from fetchUsage for Debug Mode copy (formatted JSON, indent 4).
+/// Last request/response from fetchUsage for Debug Mode copy (formatted JSON, indent 4),
+/// plus the User-Agent used for building a curl command.
 var lastRequestForDebug: String?
 var lastResponseForDebug: String?
+var lastUserAgentForDebug: String?
 
 struct UsageResponse: Codable {
     let five_hour: UsageLimit?
@@ -133,6 +135,7 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimi
 
     userAgentIndex = (userAgentIndex + 1) % userAgents.count
     let userAgent = userAgents[userAgentIndex]
+    lastUserAgentForDebug = userAgent
 
     var request = URLRequest(url: url)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -766,7 +769,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         moreItem.submenu = moreMenu
         settingsMenu.addItem(moreItem)
 
-        // Debug Mode submenu — copy latest request/response as formatted JSON
+        // Debug Mode submenu — copy latest request/response as formatted JSON or as a curl command
         let debugMenu = NSMenu()
         let debugRequestItem = NSMenuItem(title: "Request", action: #selector(copyDebugRequest), keyEquivalent: "")
         debugRequestItem.target = self
@@ -774,6 +777,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let debugResponseItem = NSMenuItem(title: "Response", action: #selector(copyDebugResponse), keyEquivalent: "")
         debugResponseItem.target = self
         debugMenu.addItem(debugResponseItem)
+        let debugCurlItem = NSMenuItem(title: "curl", action: #selector(copyDebugCurl), keyEquivalent: "")
+        debugCurlItem.target = self
+        debugMenu.addItem(debugCurlItem)
         let debugItem = NSMenuItem(title: "Debug Mode", action: nil, keyEquivalent: "")
         debugItem.submenu = debugMenu
         settingsMenu.addItem(debugItem)
@@ -1076,6 +1082,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func copyDebugResponse() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lastResponseForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyDebugCurl() {
+        let ua = lastUserAgentForDebug ?? "curl/8.4.0"
+        let script = """
+CC_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys, json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])")
+curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
+  -H "Authorization: Bearer $CC_TOKEN" \\
+  -H "anthropic-beta: oauth-2025-04-20" \\
+  -H "User-Agent: \(ua)"
+"""
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(script, forType: .string)
     }
 
     @objc func quit() {
