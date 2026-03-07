@@ -543,7 +543,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var hotKeyRef: EventHotKeyRef?
     var eventHandlerRef: EventHandlerRef?
     var lastMenuCloseTime: Date = .distantPast
-    var hotkeyKeyCode: UInt32 = UInt32(kVK_ANSI_C) // default: C
+    var hotkeyKeyCode: UInt32 = UInt32(kVK_ANSI_X) // default: X (Cmd+Shift+X)
     var hotkeyModifiers: UInt32 = UInt32(cmdKey | shiftKey) // default: Cmd+Shift
     var hotkeyCurrentItem: NSMenuItem!
     var hotkeyRecordItem: NSMenuItem!
