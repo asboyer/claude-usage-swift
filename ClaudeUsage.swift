@@ -61,6 +61,14 @@ struct ExtraUsage: Codable {
     let utilization: Double?
 }
 
+struct APIErrorResponse: Codable {
+    let error: APIError?
+    struct APIError: Codable {
+        let message: String?
+        let type: String?
+    }
+}
+
 // All trackable usage categories
 let allCategoryKeys: [String] = [
     "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet",
@@ -104,9 +112,9 @@ func getOAuthToken() -> String? {
     }
 }
 
-func fetchUsage(token: String, completion: @escaping (UsageResponse?) -> Void) {
+func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimited: Bool) -> Void) {
     guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-        completion(nil)
+        completion(nil, false)
         return
     }
 
@@ -117,12 +125,20 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?) -> Void) {
 
     let session = URLSession(configuration: .ephemeral)
     session.dataTask(with: request) { data, _, _ in
-        guard let data = data,
-              let usage = try? JSONDecoder().decode(UsageResponse.self, from: data) else {
-            completion(nil)
+        guard let data = data else {
+            completion(nil, false)
             return
         }
-        completion(usage)
+        if let errorResponse = try? JSONDecoder().decode(APIErrorResponse.self, from: data),
+           errorResponse.error?.type == "rate_limit_error" {
+            completion(nil, true)
+            return
+        }
+        guard let usage = try? JSONDecoder().decode(UsageResponse.self, from: data) else {
+            completion(nil, false)
+            return
+        }
+        completion(usage, false)
     }.resume()
 }
 
@@ -207,6 +223,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Data-driven usage items: key -> menu item
     var usageItems: [String: NSMenuItem] = [:]
     var updatedItem: NSMenuItem!
+    var rateLimitItem: NSMenuItem!
+    var isRateLimited = false
 
     // Which keys are pinned to the main menu
     var menuReady = false
@@ -359,6 +377,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             usageItems[key] = item
         }
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
+        rateLimitItem = NSMenuItem(title: "Rate limited. Try again later.", action: nil, keyEquivalent: "")
+        rateLimitItem.isEnabled = false
 
         // Build the full menu
         menu = NSMenu()
@@ -565,6 +585,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(rateLimitItem)
         menu.addItem(updatedItem)
 
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
@@ -1019,9 +1040,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            fetchUsage(token: token) { usage in
+            fetchUsage(token: token) { usage, rateLimited in
                 DispatchQueue.main.async {
-                    self?.updateUI(usage: usage)
+                    self?.updateUI(usage: usage, rateLimited: rateLimited)
                 }
             }
         }
@@ -1105,7 +1126,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func updateUI(usage: UsageResponse?) {
+    func updateUI(usage: UsageResponse?, rateLimited: Bool = false) {
+        isRateLimited = rateLimited
+        rateLimitItem?.isHidden = !rateLimited
+        if rateLimited {
+            rateLimitItem?.attributedTitle = NSAttributedString(
+                string: "Rate limited. Try again later.",
+                attributes: [.foregroundColor: NSColor.systemRed, .font: NSFont.menuFont(ofSize: 14)]
+            )
+        }
+
         guard let usage = usage else {
             hasData = false
             statusItem.button?.title = "..."
