@@ -66,6 +66,42 @@ cp -r ClaudeUsage.app /Applications/
 open /Applications/ClaudeUsage.app
 ```
 
+## Updating
+
+### From a cloned repo (recommended)
+
+If you cloned this repo (e.g. into `~/Developer/claude-usage-swift`), you can update to the latest version with:
+
+```bash
+cd /path/to/claude-usage-swift
+git pull
+./build.sh
+cp -r ClaudeUsage.app /Applications/
+open /Applications/ClaudeUsage.app
+```
+
+This rebuilds and reinstalls the app into `/Applications`, then opens the new version.
+
+### Using the update script (shortcut)
+
+For quicker local updates during development, you can use the included `update.sh` script from the repo root:
+
+```bash
+./update.sh
+```
+
+This script:
+
+- Quits any running `ClaudeUsage` process
+- Removes `/Applications/ClaudeUsage.app`
+- Runs `./build.sh`
+- Moves the new `ClaudeUsage.app` into `/Applications/`
+- Opens `/Applications/ClaudeUsage.app`
+
+### From the app
+
+In the menu bar app, go to **Help → Update…** to open this **Updating** section on GitHub in your browser.
+
 ## How It Works
 
 The app can fetch usage in two ways (choose in **Settings → Usage Source**):

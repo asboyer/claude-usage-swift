@@ -1017,6 +1017,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         shareItem.target = self
         helpMenu.addItem(shareItem)
 
+        let updateItem = NSMenuItem(title: "Update…", action: #selector(openUpdateDocs), keyEquivalent: "")
+        updateItem.target = self
+        helpMenu.addItem(updateItem)
+
         helpMenu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
@@ -1264,6 +1268,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openGitHub() {
         if let url = URL(string: "https://github.com/asboyer/claude-usage-swift") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc func openUpdateDocs() {
+        if let url = URL(string: "https://github.com/asboyer/claude-usage-swift#updating") {
             NSWorkspace.shared.open(url)
         }
     }
