@@ -26,21 +26,21 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ## Screenshot
 
-![Claude Usage Tracker](screenshot.png)
+![Claude Usage Tracker](img/screenshot.png)
 
 ### Demos
 
 **Keyboard Shortcuts** — use `Cmd+Shift+X` to open the menu, then `c` to copy, `r` to refresh, and `x` to close. (Default was changed from `Cmd+Shift+C` to avoid conflicting with iTerm2’s copy mode and to pair open/close: **X** opens the menu, **x** closes it.)
 
-![Keyboard Shortcuts Demo](hover-demo.gif)
+![Keyboard Shortcuts Demo](img/hover-demo.gif)
 
 **Mouse Navigation** - click the menu bar item to navigate with your mouse:
 
-![Mouse Click Demo](click-demo.gif)
+![Mouse Click Demo](img/click-demo.gif)
 
 **100% limit** - when your session usage reaches 100%, the menu shows reset time and optional alerts:
 
-![100% Limit Demo](full.gif)
+![100% Limit Demo](img/full.gif)
 
 ## Requirements
 
@@ -65,6 +65,42 @@ To keep the app in your Applications folder (optional):
 cp -r ClaudeUsage.app /Applications/
 open /Applications/ClaudeUsage.app
 ```
+
+## Updating
+
+### From a cloned repo (recommended)
+
+If you cloned this repo (e.g. into `~/Developer/claude-usage-swift`), you can update to the latest version with:
+
+```bash
+cd /path/to/claude-usage-swift
+git pull
+./build.sh
+cp -r ClaudeUsage.app /Applications/
+open /Applications/ClaudeUsage.app
+```
+
+This rebuilds and reinstalls the app into `/Applications`, then opens the new version.
+
+### Using the update script (shortcut)
+
+For quicker local updates during development, you can use the included `update.sh` script from the repo root:
+
+```bash
+./update.sh
+```
+
+This script:
+
+- Quits any running `ClaudeUsage` process
+- Removes `/Applications/ClaudeUsage.app`
+- Runs `./build.sh`
+- Moves the new `ClaudeUsage.app` into `/Applications/`
+- Opens `/Applications/ClaudeUsage.app`
+
+### From the app
+
+In the menu bar app, go to **Help → Update…** to open this **Updating** section on GitHub in your browser.
 
 ## How It Works
 
