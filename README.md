@@ -8,21 +8,18 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ## Features
 
-- **Live usage percentage** in menu bar (5-hour session)
-- **Two ways to fetch usage** — **Desktop cookies** (recommended) or **OAuth API**, selectable in Settings; Desktop cookies use Claude Desktop’s web session and avoid the OAuth usage API rate limits
-- **Rate limit handling** — when the OAuth usage API returns 429, the menu shows a red “Rate limited. Try again later.” message above the “Updated” line
-- **Configurable global hotkey** — press `Cmd+Shift+X` (customizable in Settings) to open the menu from anywhere
-- **Keyboard shortcuts** — `c` to copy usage, `r` to refresh, `x` to close while the menu is open
-- **Color-coded severity** — optional 5-level coloring based on usage pace relative to session time elapsed
-- **5-hour session** usage with reset countdown
-- **Weekly limits** with reset date
-- **Sonnet-specific** weekly limit tracking
-- **Extra usage** spending ($X/$Y format)
-- **Auto-refresh** every 1, 5, 30, or 60 minutes
-- **Open at Login** — toggle in Settings to start automatically
-- **Debug Mode** — copy the latest request or response as formatted JSON, or copy a ready-to-run `curl` command (Settings → Debug Mode → Request / Response / curl)
-- **Native Swift** — no Python, no dependencies
-- **Lightweight** — ~50 MB RAM
+| Feature | Description |
+| ------- | ----------- |
+| **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
+| **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
+| **Global hotkey** | Press `Cmd+Shift+X` from anywhere to open the menu (customizable in Settings). |
+| **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `x` close. |
+| **Color-coded severity** | Optional green → yellow → orange → red based on how fast you’re burning through your session. |
+| **5-hour & weekly limits** | Utilization plus countdown to reset for each window. |
+| **Auto-refresh** | Poll every 1, 5, 30, or 60 minutes. |
+| **Open at Login** | Start the app when you log in to your Mac. |
+| **Debug Mode** | Copy the latest request or response as JSON, or a ready-to-run `curl` (Settings → Debug Mode). |
+| **Native Swift** | No Python, no runtime deps — single app, ~50 MB RAM. |
 
 ## Screenshot
 
@@ -121,7 +118,9 @@ Uses the same approach as [claude-web-usage](https://github.com/skibidiskib/clau
 
 1. Reads token from Keychain (`Claude Code-credentials`)
 2. Calls `api.anthropic.com/api/oauth/usage`
-3. Displays utilization and reset times; if the API returns 429 (rate limited), shows a red “Rate limited. Try again later.” line in the menu
+3. Displays utilization and reset times
+
+**Rate limit handling**: If the OAuth usage API returns 429, the menu shows a red “Rate limited. Try again later.” line above “Updated.” You can switch to Desktop cookies in Settings to use a separate rate-limit bucket.
 
 **Requires**: Claude Code installed and logged in.
 
