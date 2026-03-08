@@ -26,21 +26,21 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ## Screenshot
 
-![Claude Usage Tracker](screenshot.png)
+![Claude Usage Tracker](img/screenshot.png)
 
 ### Demos
 
 **Keyboard Shortcuts** — use `Cmd+Shift+X` to open the menu, then `c` to copy, `r` to refresh, and `x` to close. (Default was changed from `Cmd+Shift+C` to avoid conflicting with iTerm2’s copy mode and to pair open/close: **X** opens the menu, **x** closes it.)
 
-![Keyboard Shortcuts Demo](hover-demo.gif)
+![Keyboard Shortcuts Demo](img/hover-demo.gif)
 
 **Mouse Navigation** - click the menu bar item to navigate with your mouse:
 
-![Mouse Click Demo](click-demo.gif)
+![Mouse Click Demo](img/click-demo.gif)
 
 **100% limit** - when your session usage reaches 100%, the menu shows reset time and optional alerts:
 
-![100% Limit Demo](full.gif)
+![100% Limit Demo](img/full.gif)
 
 ## Requirements
 
