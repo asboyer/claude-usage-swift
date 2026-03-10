@@ -40,7 +40,6 @@ Use subfolders for shared functionality:
 
 ### Legacy/Other
 
-- `sources/` exists as a lowercase folder reference per project convention.
 - `docs/` contains process and architecture documentation.
 
 ## File Placement Rules
