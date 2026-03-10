@@ -4,6 +4,9 @@ ClaudeUsage.app/
 *.o
 *.d
 
+# Local chat summaries (not committed)
+chats/
+
 # macOS
 .DS_Store
 .AppleDouble

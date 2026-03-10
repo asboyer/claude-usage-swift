@@ -13,7 +13,7 @@ mkdir -p ClaudeUsage.app/Contents/Resources
 cp AppIcon.icns ClaudeUsage.app/Contents/Resources/AppIcon.icns
 
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework Carbon -framework ServiceManagement
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 
 # Create Info.plist if not exists
 if [ ! -f ClaudeUsage.app/Contents/Info.plist ]; then
