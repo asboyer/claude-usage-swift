@@ -24,4 +24,7 @@ jobs:
               run: swift test --parallel
 
             - name: Lint Swift formatting rules
-              run: swift format lint --recursive ClaudeUsage.swift Sources Tests
+              run: |
+                  swift format lint --recursive \
+                    src \
+                    tests

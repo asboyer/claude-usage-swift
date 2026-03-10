@@ -15,12 +15,13 @@ let package = Package(
     targets: [
         .target(
             name: "ClaudeUsageCore",
-            path: "Sources/ClaudeUsageCore"
+            path: "src",
+            sources: ["UsageCore.swift"]
         ),
         .testTarget(
             name: "ClaudeUsageCoreTests",
             dependencies: ["ClaudeUsageCore"],
-            path: "Tests/ClaudeUsageCoreTests"
+            path: "tests/ClaudeUsageCoreTests"
         )
     ]
 )
