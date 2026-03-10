@@ -23,9 +23,9 @@ This project uses practical, low-friction standards to keep the menu bar app rel
 This repository standardizes indentation to **4 spaces**.
 
 - `.editorconfig` defines:
-    - `indent_style = space`
-    - `indent_size = 4`
-    - `tab_width = 4`
+  - `indent_style = space`
+  - `indent_size = 4`
+  - `tab_width = 4`
 - `.swift-format` enforces Swift formatting with 4-space indentation.
 
 Run locally:
