@@ -155,7 +155,7 @@ All settings are accessible from the **Settings** submenu:
 
 Usage history is stored persistently at:
 
-```
+```text
 ~/Library/Application Support/ClaudeUsage/usage_history.json
 ```
 
@@ -202,6 +202,32 @@ The app may ask for access to Keychain items **Claude Code-credentials** (OAuth)
 ### Building fails
 
 - Ensure Xcode Command Line Tools: `xcode-select --install`
+
+## Development
+
+### Run tests
+
+```bash
+swift test --parallel
+```
+
+### Lint and format
+
+This project uses Swift Format plus `.editorconfig` settings with **4-space indentation**.
+
+```bash
+./scripts/lint.sh
+./scripts/format.sh
+```
+
+## Contributing
+
+Contributions are welcome. Before opening a pull request:
+
+1. Read and follow [`docs/CODING_PRACTICES.md`](docs/CODING_PRACTICES.md).
+2. Run tests (`swift test --parallel`).
+3. Run lint/format checks (`./scripts/lint.sh` and `./scripts/format.sh`).
+4. Keep commits focused and use conventional commit messages.
 
 ## Credits
 
