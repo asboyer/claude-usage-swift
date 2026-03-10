@@ -223,7 +223,7 @@ extension AppDelegate {
         githubItem.target = self
         helpMenu.addItem(githubItem)
 
-        let authorItem = NSMenuItem(title: "Author", action: #selector(openAuthor), keyEquivalent: "")
+        let authorItem = NSMenuItem(title: "Author: \(appAuthor)", action: #selector(openAuthor), keyEquivalent: "")
         authorItem.target = self
         helpMenu.addItem(authorItem)
 
@@ -530,7 +530,7 @@ extension AppDelegate {
 
     @objc func shareApp() {
         guard let button = statusItem.button else { return }
-        let text = "Claude Usage Tracker - a macOS menu bar app that tracks your Claude usage limits"
+        let text = "Claude Usage Tracker by \(appAuthor) - a macOS menu bar app that tracks your Claude usage limits"
         let url = URL(string: "https://github.com/asboyer/claude-usage-swift")!
         let picker = NSSharingServicePicker(items: [text, url])
         picker.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

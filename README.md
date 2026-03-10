@@ -231,6 +231,8 @@ Contributions are welcome. Before opening a pull request:
 
 ## Credits
 
+Current maintainer/author of this Swift app fork: **asboyer**.
+
 This project is a fork of [claude-usage-swift](https://github.com/cfranci/claude-usage-swift) by [cfranci](https://github.com/cfranci). The original Python version is available at [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker) by [cfranci](https://github.com/cfranci).
 
 The **Desktop cookie–based usage** flow (and Keychain/cookie decryption approach) is inspired by [claude-web-usage](https://github.com/skibidiskib/claude-web-usage), which documents using Claude Desktop's web session to avoid OAuth usage API rate limits.

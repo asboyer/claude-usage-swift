@@ -1,6 +1,7 @@
 import Foundation
 
 let appVersion = "2.1.34"
+let appAuthor = "asboyer"
 
 // All trackable usage categories.
 let allCategoryKeys: [String] = [
