@@ -16,6 +16,17 @@ let package = Package(
         .target(
             name: "ClaudeUsageCore",
             path: "src",
+            exclude: [
+                "main.swift",
+                "AppConstants.swift",
+                "ClaudeUsage.swift",
+                "AppDelegate+MenuAndRefresh.swift",
+                "TimeFormatting.swift",
+                "SoundPlayback.swift",
+                "api",
+                "graph",
+                "history"
+            ],
             sources: ["UsageCore.swift"]
         ),
         .testTarget(
