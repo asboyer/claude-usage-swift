@@ -3,6 +3,7 @@ ClaudeUsage
 ClaudeUsage.app/
 *.o
 *.d
+.build/
 
 # Local chat summaries (not committed)
 chats/

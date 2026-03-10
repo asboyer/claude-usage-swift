@@ -13,10 +13,22 @@ mkdir -p ClaudeUsage.app/Contents/Resources
 cp AppIcon.icns ClaudeUsage.app/Contents/Resources/AppIcon.icns
 
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage ClaudeUsage.swift -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
+swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
+    src/main.swift \
+    src/AppConstants.swift \
+    src/api/UsageAPIModels.swift \
+    src/history/UsageHistoryStore.swift \
+    src/graph/UsageHeatmap.swift \
+    src/api/ClaudeDesktopUsageAPI.swift \
+    src/api/OAuthUsageAPI.swift \
+    src/TimeFormatting.swift \
+    src/SoundPlayback.swift \
+    src/AppDelegate+MenuAndRefresh.swift \
+    src/ClaudeUsage.swift \
+    src/UsageCore.swift \
+    -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 
-# Create Info.plist if not exists
-if [ ! -f ClaudeUsage.app/Contents/Info.plist ]; then
+# Create Info.plist
 cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -28,6 +40,8 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
     <string>com.claude.usage-tracker</string>
     <key>CFBundleName</key>
     <string>Claude Usage</string>
+    <key>CFBundleGetInfoString</key>
+    <string>Author: asboyer</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
@@ -45,6 +59,5 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
 </dict>
 </plist>
 EOF
-fi
 
 echo "Done! Run with: open ClaudeUsage.app"
