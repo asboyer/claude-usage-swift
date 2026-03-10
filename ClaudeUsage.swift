@@ -63,9 +63,10 @@ struct UsageResponse: Codable {
 }
 
 func detectModel(_ usage: UsageResponse) -> String {
-    if let opus = usage.seven_day_opus, opus.utilization > 0 { return "opus" }
-    if let sonnet = usage.seven_day_sonnet, sonnet.utilization > 0 { return "sonnet" }
-    return "opus"
+    return UsageModelDetector.detectPreferredModel(
+        opusUtilization: usage.seven_day_opus?.utilization,
+        sonnetUtilization: usage.seven_day_sonnet?.utilization
+    )
 }
 
 struct UsageLimit: Codable {
@@ -89,21 +90,6 @@ struct APIErrorResponse: Codable {
 }
 
 // MARK: - Usage History (persistent file-based storage)
-
-struct UsageSample: Codable {
-    let date: Date
-    let utilization: Double
-}
-
-struct DailySummary: Codable {
-    let date: String
-    var peakUtilization: Double
-}
-
-struct UsageHistoryFile: Codable {
-    var samples: [String: [UsageSample]]
-    var dailySummaries: [String: [DailySummary]]
-}
 
 private let maxSamplesPerKey = 100
 
@@ -160,88 +146,25 @@ func loadUsageHistory(_ categoryKey: String) -> [UsageSample] {
 }
 
 func recordUsageSample(_ categoryKey: String, utilization: Double) {
-    var file = loadHistoryFile()
-    var history = file.samples[categoryKey] ?? []
-    let now = Date()
-
-    if let last = history.last, utilization < last.utilization - 5 {
-        history.removeAll()
-    }
-
-    history.append(UsageSample(date: now, utilization: utilization))
-    if history.count > maxSamplesPerKey {
-        history = Array(history.suffix(maxSamplesPerKey))
-    }
-    file.samples[categoryKey] = history
-
-    // Upsert daily peak summary
-    let todayStr = dailyDateFormatter.string(from: now)
-    var summaries = file.dailySummaries[categoryKey] ?? []
-    if let idx = summaries.lastIndex(where: { $0.date == todayStr }) {
-        summaries[idx].peakUtilization = max(summaries[idx].peakUtilization, utilization)
-    } else {
-        summaries.append(DailySummary(date: todayStr, peakUtilization: utilization))
-    }
-    file.dailySummaries[categoryKey] = summaries
-
-    saveHistoryFile(file)
-}
-
-struct UsageRate {
-    let perHour: Double?
-    let perDay: Double?
-    let descriptor: String
-    let isWeekly: Bool
+    let updatedFile = UsageHistoryRecorder.record(
+        in: loadHistoryFile(),
+        categoryKey: categoryKey,
+        utilization: utilization,
+        maxSamplesPerCategory: maxSamplesPerKey,
+        dailyDateFormatter: dailyDateFormatter
+    )
+    saveHistoryFile(updatedFile)
 }
 
 /// Compute usage rate from recent history.
 /// For 5-hour categories uses a ~30-min lookback and reports %/hr.
 /// For 7-day categories uses a ~24-hour lookback and reports %/day.
 func rateForCategory(_ categoryKey: String, currentUtil: Double, isWeekly: Bool) -> UsageRate {
-    let history = loadUsageHistory(categoryKey)
-    let now = Date()
-    let lookback: TimeInterval = isWeekly ? 24 * 3600 : 30 * 60
-
-    // Find oldest sample within lookback window
-    var baseline: UsageSample?
-    for sample in history {
-        if now.timeIntervalSince(sample.date) <= lookback {
-            baseline = sample
-            break
-        }
-    }
-
-    // Fall back to the earliest available sample
-    if baseline == nil { baseline = history.first }
-
-    guard let base = baseline else {
-        return UsageRate(perHour: nil, perDay: nil, descriptor: "--", isWeekly: isWeekly)
-    }
-
-    let timeDiffHours = max(now.timeIntervalSince(base.date) / 3600.0, 1.0 / 60.0)
-    let deltaUtil = currentUtil - base.utilization
-
-    // If delta is negative, a reset occurred; rate is just currentUtil over elapsed time since reset
-    let effectiveDelta = deltaUtil < 0 ? currentUtil : deltaUtil
-    let ratePerHour = effectiveDelta / timeDiffHours
-
-    if isWeekly {
-        let ratePerDay = ratePerHour * 24
-        let desc: String
-        if ratePerDay <= 10 { desc = "light" }
-        else if ratePerDay <= 15 { desc = "steady" }
-        else if ratePerDay <= 25 { desc = "fast" }
-        else { desc = "heavy" }
-        return UsageRate(perHour: ratePerHour, perDay: ratePerDay, descriptor: desc, isWeekly: true)
-    } else {
-        let desc: String
-        if ratePerHour <= 12 { desc = "light" }
-        else if ratePerHour <= 20 { desc = "steady" }
-        else if ratePerHour <= 30 { desc = "fast" }
-        else if ratePerHour <= 50 { desc = "heavy" }
-        else { desc = "extreme" }
-        return UsageRate(perHour: ratePerHour, perDay: ratePerHour * 24, descriptor: desc, isWeekly: false)
-    }
+    return UsageRateCalculator.calculateRate(
+        from: loadUsageHistory(categoryKey),
+        currentUtilization: currentUtil,
+        isWeekly: isWeekly
+    )
 }
 
 /// Map rate descriptor to a color for the rate menu item
@@ -1874,36 +1797,22 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             return
         }
         let rate = rateForCategory(key, currentUtil: utilization, isWeekly: isWeekly)
-
-        if isWeekly {
-            guard let perDay = rate.perDay else {
-                item.isHidden = true
-                return
-            }
-            let rateText = String(format: "  %.0f%%/day", perDay)
-            let full = "\(rateText) · \(rate.descriptor)"
-            let color = colorsEnabled ? rateDescriptorColor(rate.descriptor) : NSColor.secondaryLabelColor
-            item.attributedTitle = NSAttributedString(string: full, attributes: [
-                .font: NSFont.menuFont(ofSize: 12),
-                .foregroundColor: color
-            ])
-            item.title = full
-            item.isHidden = false
-        } else {
-            guard let perHour = rate.perHour else {
-                item.isHidden = true
-                return
-            }
-            let rateText = String(format: "  %.0f%%/hr", perHour)
-            let full = "\(rateText) · \(rate.descriptor)"
-            let color = colorsEnabled ? rateDescriptorColor(rate.descriptor) : NSColor.secondaryLabelColor
-            item.attributedTitle = NSAttributedString(string: full, attributes: [
-                .font: NSFont.menuFont(ofSize: 12),
-                .foregroundColor: color
-            ])
-            item.title = full
-            item.isHidden = false
+        guard let value = isWeekly ? rate.perDay : rate.perHour else {
+            item.isHidden = true
+            return
         }
+
+        let unitLabel = isWeekly ? "day" : "hr"
+        let rateText = String(format: "  %.0f%%/%@", value, unitLabel)
+        let title = "\(rateText) · \(rate.descriptor)"
+        let color = colorsEnabled ? rateDescriptorColor(rate.descriptor) : NSColor.secondaryLabelColor
+
+        item.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: 12),
+            .foregroundColor: color
+        ])
+        item.title = title
+        item.isHidden = false
     }
 
     func updateUsageItem(key: String, limit: UsageLimit?, windowSeconds: TimeInterval = 0) {
@@ -2070,9 +1979,3 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
     }
 }
 
-// MARK: - Main
-
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
