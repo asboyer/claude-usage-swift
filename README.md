@@ -225,9 +225,10 @@ This project uses Swift Format plus `.editorconfig` settings with **4-space inde
 Contributions are welcome. Before opening a pull request:
 
 1. Read and follow [`docs/CODING_PRACTICES.md`](docs/CODING_PRACTICES.md).
-2. Run tests (`swift test --parallel`).
-3. Run lint/format checks (`./scripts/lint.sh` and `./scripts/format.sh`).
-4. Keep commits focused and use conventional commit messages.
+2. Review [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for file placement and build update rules.
+3. Run tests (`swift test --parallel`).
+4. Run lint/format checks (`./scripts/lint.sh` and `./scripts/format.sh`).
+5. Keep commits focused and use conventional commit messages.
 
 ## Credits
 
