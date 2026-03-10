@@ -13,11 +13,15 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
 | **Global hotkey** | Press `Cmd+Shift+X` from anywhere to open the menu (customizable in Settings). |
-| **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `x` close. |
-| **Color-coded severity** | Optional green → yellow → orange → red based on how fast you’re burning through your session. |
+| **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `g` usage graph, `x` close. |
+| **Color-coded severity** | Optional projection-based green → yellow → orange → red that answers "will I run out before the window resets?" |
+| **Rate Insight** | Optional per-category usage rate (%/hr or %/day) with descriptors: *light*, *steady*, *fast*, *heavy*, *extreme*. |
+| **Usage Graph** | GitHub-contribution-style 90-day heatmap of your daily peak usage, rendered in a floating panel. Press `g` to open. |
 | **5-hour & weekly limits** | Utilization plus countdown to reset for each window. |
 | **Auto-refresh** | Poll every 1, 5, 30, or 60 minutes. |
 | **Open at Login** | Start the app when you log in to your Mac. |
+| **Persistent history** | Usage data stored in `~/Library/Application Support/ClaudeUsage/` — survives app updates and reinstalls. |
+| **Export Data** | Download your full usage history as JSON for custom analysis (Settings → Export Data). |
 | **Debug Mode** | Copy the latest request or response as JSON, or a ready-to-run `curl` (Settings → Debug Mode). |
 | **Native Swift** | No Python, no runtime deps — single app, ~50 MB RAM. |
 
@@ -27,7 +31,7 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 
 ### Demos
 
-**Keyboard Shortcuts** — use `Cmd+Shift+X` to open the menu, then `c` to copy, `r` to refresh, and `x` to close. (Default was changed from `Cmd+Shift+C` to avoid conflicting with iTerm2’s copy mode and to pair open/close: **X** opens the menu, **x** closes it.)
+**Keyboard Shortcuts** — use `Cmd+Shift+X` to open the menu, then `c` to copy, `r` to refresh, and `x` to close. (Default was changed from `Cmd+Shift+C` to avoid conflicting with iTerm2's copy mode and to pair open/close: **X** opens the menu, **x** closes it.)
 
 ![Keyboard Shortcuts Demo](img/hover-demo.gif)
 
@@ -105,14 +109,14 @@ The app can fetch usage in two ways (choose in **Settings → Usage Source**):
 
 ### Option 1: Desktop cookies (recommended)
 
-Uses the same approach as [claude-web-usage](https://github.com/skibidiskib/claude-web-usage): Claude Desktop’s web session cookies and a separate API so you avoid the OAuth usage API rate limits.
+Uses the same approach as [claude-web-usage](https://github.com/skibidiskib/claude-web-usage): Claude Desktop's web session cookies and a separate API so you avoid the OAuth usage API rate limits.
 
 1. Reads the encryption key from Keychain (`Claude Safe Storage`)
-2. Decrypts Claude Desktop’s Chromium cookies from `~/Library/Application Support/Claude/Cookies` (PBKDF2 + AES-128-CBC)
+2. Decrypts Claude Desktop's Chromium cookies from `~/Library/Application Support/Claude/Cookies` (PBKDF2 + AES-128-CBC)
 3. Calls `https://claude.ai/api/organizations/{orgId}/usage` with `sessionKey` and `lastActiveOrg`
 4. If that fails (e.g. no Claude Desktop), falls back to the OAuth usage API
 
-**Requires**: Claude Desktop app installed and logged in to claude.ai at least once (cookies can be read even when the app isn’t running).
+**Requires**: Claude Desktop app installed and logged in to claude.ai at least once (cookies can be read even when the app isn't running).
 
 ### Option 2: OAuth API
 
@@ -120,7 +124,7 @@ Uses the same approach as [claude-web-usage](https://github.com/skibidiskib/clau
 2. Calls `api.anthropic.com/api/oauth/usage`
 3. Displays utilization and reset times
 
-**Rate limit handling**: If the OAuth usage API returns 429, the menu shows a red “Rate limited. Try again later.” line above “Updated.” You can switch to Desktop cookies in Settings to use a separate rate-limit bucket.
+**Rate limit handling**: If the OAuth usage API returns 429, the menu shows a red "Rate limited. Try again later." line above "Updated." You can switch to Desktop cookies in Settings to use a separate rate-limit bucket.
 
 **Requires**: Claude Code installed and logged in.
 
@@ -132,31 +136,47 @@ All settings are accessible from the **Settings** submenu:
 
 - **Refresh Interval** — 1 minute, 5 minutes, 30 minutes, or 1 hour
 - **Usage Source** — how to fetch usage:
-  - **Use Desktop Cookies (recommended)** — Claude Desktop web session; avoids OAuth usage API rate limits; falls back to OAuth if cookies aren’t available
+  - **Use Desktop Cookies (recommended)** — Claude Desktop web session; avoids OAuth usage API rate limits; falls back to OAuth if cookies aren't available
   - **Use OAuth API** — only `api.anthropic.com/api/oauth/usage` (may hit 429 when rate limited)
-- **Colors** — toggle color-coded usage with 5 severity levels:
-  - **Green** (≤0.75) — on pace with your session budget
-  - **Yellow** (0.75–1.0) — moderate usage pace
-  - **Light Orange** (1.0–1.5) — elevated usage
-  - **Dark Orange** (1.5–2.5) — heavy usage
-  - **Red** — very heavy usage relative to time elapsed, or 100% utilization
+- **Colors** — toggle projection-based color coding:
+  - **Green** (projected ≤80%) — on pace to finish well under 100%
+  - **Yellow** (projected 80–105%) — might reach 100%
+  - **Orange** (projected 105–140%) — will overshoot, burning fast
+  - **Red** (projected >140% or already at 100%) — significantly overshooting
+- **Rate Insight** — toggle per-category rate display showing %/hr (5-hour categories) or %/day (weekly categories) with a descriptor (*light*, *steady*, *fast*, *heavy*, *extreme*) based on sustainable usage thresholds
 - **Keyboard Shortcut** — global hotkey to open the menu (default: `Cmd+Shift+X`)
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **More** — pin or unpin categories (5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra)
 - **Debug Mode** — copy the latest request or response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
+- **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
+
+## Data Storage
+
+Usage history is stored persistently at:
+
+```
+~/Library/Application Support/ClaudeUsage/usage_history.json
+```
+
+This location is outside the app bundle, so your data survives app updates, deletions, and reinstalls. The file contains:
+
+- **Rolling samples** — recent utilization readings per category (used for rate calculations)
+- **Daily summaries** — one peak-utilization entry per day per category (used for the usage graph and long-term tracking)
+
+On first launch, any existing usage data from the app's previous UserDefaults storage is automatically migrated to this file.
 
 ## Troubleshooting
 
 ### Menu bar shows "..." or no data
 
-- **Desktop cookies (default)**: Ensure [Claude Desktop](https://claude.ai/download) is installed and you’ve logged in to claude.ai at least once so cookies exist. The app does not need to be running.
+- **Desktop cookies (default)**: Ensure [Claude Desktop](https://claude.ai/download) is installed and you've logged in to claude.ai at least once so cookies exist. The app does not need to be running.
 - **OAuth API**: Ensure [Claude Code](https://claude.ai/code) is installed and logged in; run `claude` in terminal to confirm.
-- Try **Settings → Usage Source → Use Desktop Cookies (recommended)** if you’re getting persistent “Rate limited” with OAuth.
+- Try **Settings → Usage Source → Use Desktop Cookies (recommended)** if you're getting persistent "Rate limited" with OAuth.
 
 ### "Rate limited. Try again later." in red
 
-The OAuth usage API (`api.anthropic.com/api/oauth/usage`) is returning 429. Switch to **Settings → Usage Source → Use Desktop Cookies (recommended)** so the app uses Claude Desktop’s web session and a different rate limit bucket.
+The OAuth usage API (`api.anthropic.com/api/oauth/usage`) is returning 429. Switch to **Settings → Usage Source → Use Desktop Cookies (recommended)** so the app uses Claude Desktop's web session and a different rate limit bucket.
 
 ### Keychain access prompt
 
@@ -187,7 +207,7 @@ The app may ask for access to Keychain items **Claude Code-credentials** (OAuth)
 
 This project is a fork of [claude-usage-swift](https://github.com/cfranci/claude-usage-swift) by [cfranci](https://github.com/cfranci). The original Python version is available at [claude-usage-tracker](https://github.com/cfranci/claude-usage-tracker) by [cfranci](https://github.com/cfranci).
 
-The **Desktop cookie–based usage** flow (and Keychain/cookie decryption approach) is inspired by [claude-web-usage](https://github.com/skibidiskib/claude-web-usage), which documents using Claude Desktop’s web session to avoid OAuth usage API rate limits.
+The **Desktop cookie–based usage** flow (and Keychain/cookie decryption approach) is inspired by [claude-web-usage](https://github.com/skibidiskib/claude-web-usage), which documents using Claude Desktop's web session to avoid OAuth usage API rate limits.
 
 ## License
 

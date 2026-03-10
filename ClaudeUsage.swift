@@ -4,6 +4,7 @@ import Security
 import ServiceManagement
 import SQLite3
 import CommonCrypto
+import WebKit
 
 // MARK: - Constants
 
@@ -85,6 +86,323 @@ struct APIErrorResponse: Codable {
         let message: String?
         let type: String?
     }
+}
+
+// MARK: - Usage History (persistent file-based storage)
+
+struct UsageSample: Codable {
+    let date: Date
+    let utilization: Double
+}
+
+struct DailySummary: Codable {
+    let date: String
+    var peakUtilization: Double
+}
+
+struct UsageHistoryFile: Codable {
+    var samples: [String: [UsageSample]]
+    var dailySummaries: [String: [DailySummary]]
+}
+
+private let maxSamplesPerKey = 100
+
+private let historyDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/ClaudeUsage")
+
+private let historyFileURL: URL = historyDirectory.appendingPathComponent("usage_history.json")
+
+private let dailyDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = .current
+    return f
+}()
+
+private var historyCache: UsageHistoryFile?
+
+func loadHistoryFile() -> UsageHistoryFile {
+    if let cached = historyCache { return cached }
+    guard let data = try? Data(contentsOf: historyFileURL),
+          let file = try? JSONDecoder().decode(UsageHistoryFile.self, from: data) else {
+        return UsageHistoryFile(samples: [:], dailySummaries: [:])
+    }
+    historyCache = file
+    return file
+}
+
+func saveHistoryFile(_ file: UsageHistoryFile) {
+    historyCache = file
+    try? FileManager.default.createDirectory(at: historyDirectory, withIntermediateDirectories: true)
+    if let data = try? JSONEncoder().encode(file) {
+        try? data.write(to: historyFileURL, options: .atomic)
+    }
+}
+
+func migrateUserDefaultsHistory() {
+    let ud = UserDefaults.standard
+    guard ud.bool(forKey: "historyMigrated") == false else { return }
+    var file = loadHistoryFile()
+    for key in allCategoryKeys {
+        let udKey = "usageHistory_\(key)"
+        if let data = ud.data(forKey: udKey),
+           let samples = try? JSONDecoder().decode([UsageSample].self, from: data) {
+            file.samples[key] = samples
+            ud.removeObject(forKey: udKey)
+        }
+    }
+    saveHistoryFile(file)
+    ud.set(true, forKey: "historyMigrated")
+}
+
+func loadUsageHistory(_ categoryKey: String) -> [UsageSample] {
+    return loadHistoryFile().samples[categoryKey] ?? []
+}
+
+func recordUsageSample(_ categoryKey: String, utilization: Double) {
+    var file = loadHistoryFile()
+    var history = file.samples[categoryKey] ?? []
+    let now = Date()
+
+    if let last = history.last, utilization < last.utilization - 5 {
+        history.removeAll()
+    }
+
+    history.append(UsageSample(date: now, utilization: utilization))
+    if history.count > maxSamplesPerKey {
+        history = Array(history.suffix(maxSamplesPerKey))
+    }
+    file.samples[categoryKey] = history
+
+    // Upsert daily peak summary
+    let todayStr = dailyDateFormatter.string(from: now)
+    var summaries = file.dailySummaries[categoryKey] ?? []
+    if let idx = summaries.lastIndex(where: { $0.date == todayStr }) {
+        summaries[idx].peakUtilization = max(summaries[idx].peakUtilization, utilization)
+    } else {
+        summaries.append(DailySummary(date: todayStr, peakUtilization: utilization))
+    }
+    file.dailySummaries[categoryKey] = summaries
+
+    saveHistoryFile(file)
+}
+
+struct UsageRate {
+    let perHour: Double?
+    let perDay: Double?
+    let descriptor: String
+    let isWeekly: Bool
+}
+
+/// Compute usage rate from recent history.
+/// For 5-hour categories uses a ~30-min lookback and reports %/hr.
+/// For 7-day categories uses a ~24-hour lookback and reports %/day.
+func rateForCategory(_ categoryKey: String, currentUtil: Double, isWeekly: Bool) -> UsageRate {
+    let history = loadUsageHistory(categoryKey)
+    let now = Date()
+    let lookback: TimeInterval = isWeekly ? 24 * 3600 : 30 * 60
+
+    // Find oldest sample within lookback window
+    var baseline: UsageSample?
+    for sample in history {
+        if now.timeIntervalSince(sample.date) <= lookback {
+            baseline = sample
+            break
+        }
+    }
+
+    // Fall back to the earliest available sample
+    if baseline == nil { baseline = history.first }
+
+    guard let base = baseline else {
+        return UsageRate(perHour: nil, perDay: nil, descriptor: "--", isWeekly: isWeekly)
+    }
+
+    let timeDiffHours = max(now.timeIntervalSince(base.date) / 3600.0, 1.0 / 60.0)
+    let deltaUtil = currentUtil - base.utilization
+
+    // If delta is negative, a reset occurred; rate is just currentUtil over elapsed time since reset
+    let effectiveDelta = deltaUtil < 0 ? currentUtil : deltaUtil
+    let ratePerHour = effectiveDelta / timeDiffHours
+
+    if isWeekly {
+        let ratePerDay = ratePerHour * 24
+        let desc: String
+        if ratePerDay <= 10 { desc = "light" }
+        else if ratePerDay <= 15 { desc = "steady" }
+        else if ratePerDay <= 25 { desc = "fast" }
+        else { desc = "heavy" }
+        return UsageRate(perHour: ratePerHour, perDay: ratePerDay, descriptor: desc, isWeekly: true)
+    } else {
+        let desc: String
+        if ratePerHour <= 12 { desc = "light" }
+        else if ratePerHour <= 20 { desc = "steady" }
+        else if ratePerHour <= 30 { desc = "fast" }
+        else if ratePerHour <= 50 { desc = "heavy" }
+        else { desc = "extreme" }
+        return UsageRate(perHour: ratePerHour, perDay: ratePerHour * 24, descriptor: desc, isWeekly: false)
+    }
+}
+
+/// Map rate descriptor to a color for the rate menu item
+func rateDescriptorColor(_ descriptor: String) -> NSColor {
+    switch descriptor {
+    case "light":   return NSColor(calibratedHue: 120.0/360.0, saturation: 0.7, brightness: 0.9, alpha: 1.0)
+    case "steady":  return NSColor.secondaryLabelColor
+    case "fast":    return NSColor(calibratedHue: 55.0/360.0, saturation: 0.85, brightness: 1.0, alpha: 1.0)
+    case "heavy":   return NSColor(calibratedHue: 25.0/360.0, saturation: 0.85, brightness: 0.95, alpha: 1.0)
+    case "extreme": return NSColor(calibratedHue: 0, saturation: 0.8, brightness: 1.0, alpha: 1.0)
+    default:        return NSColor.secondaryLabelColor
+    }
+}
+
+// MARK: - Usage Heatmap
+
+func generateHeatmapHTML() -> String {
+    let file = loadHistoryFile()
+    let summaries = file.dailySummaries["five_hour"] ?? []
+
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: Date())
+
+    // Build lookup from date string -> peak utilization
+    var lookup: [String: Double] = [:]
+    for s in summaries { lookup[s.date] = s.peakUtilization }
+
+    // Generate 90 days of data ending today
+    var days: [(dateStr: String, weekday: Int, weekIndex: Int, level: Int)] = []
+    guard let startDate = calendar.date(byAdding: .day, value: -89, to: today) else { return "" }
+
+    // Align start to a Sunday so columns are full weeks
+    let startWeekday = calendar.component(.weekday, from: startDate)
+    let alignedStart = calendar.date(byAdding: .day, value: -(startWeekday - 1), to: startDate)!
+    let totalDays = calendar.dateComponents([.day], from: alignedStart, to: today).day! + 1
+    let numWeeks = (totalDays + 6) / 7
+
+    for i in 0..<(numWeeks * 7) {
+        guard let d = calendar.date(byAdding: .day, value: i, to: alignedStart) else { continue }
+        let ds = dailyDateFormatter.string(from: d)
+        let wd = calendar.component(.weekday, from: d) - 1 // 0=Sun
+        let wi = i / 7
+        let peak = lookup[ds]
+        let level: Int
+        if d > today {
+            level = -1 // future
+        } else if let p = peak {
+            if p >= 90 { level = 4 }
+            else if p >= 61 { level = 3 }
+            else if p >= 31 { level = 2 }
+            else if p >= 1 { level = 1 }
+            else { level = 0 }
+        } else {
+            level = 0
+        }
+        days.append((ds, wd, wi, level))
+    }
+
+    // Month labels
+    var monthLabels: [(weekIndex: Int, label: String)] = []
+    let monthFormatter = DateFormatter()
+    monthFormatter.dateFormat = "MMM"
+    var lastMonth = -1
+    for i in 0..<(numWeeks * 7) {
+        guard let d = calendar.date(byAdding: .day, value: i, to: alignedStart) else { continue }
+        let m = calendar.component(.month, from: d)
+        if m != lastMonth && calendar.component(.weekday, from: d) == 1 {
+            lastMonth = m
+            monthLabels.append((i / 7, monthFormatter.string(from: d)))
+        }
+    }
+
+    // Build cells HTML
+    var cellsHTML = ""
+    for day in days {
+        if day.level == -1 { continue }
+        let tooltip = day.level > 0
+            ? "\(day.dateStr): \(Int(lookup[day.dateStr] ?? 0))% peak"
+            : "\(day.dateStr): no usage"
+        cellsHTML += """
+        <rect width="11" height="11" x="\(day.weekIndex * 14)" y="\(day.weekday * 14)" \
+        rx="2" ry="2" class="level-\(day.level)"><title>\(tooltip)</title></rect>\n
+        """
+    }
+
+    // Month labels SVG
+    var monthLabelsHTML = ""
+    for ml in monthLabels {
+        monthLabelsHTML += """
+        <text x="\(ml.weekIndex * 14 + 2)" y="-4" class="month-label">\(ml.label)</text>\n
+        """
+    }
+
+    // Day labels
+    let dayLabelsHTML = """
+    <text x="-28" y="23" class="day-label">Mon</text>
+    <text x="-28" y="51" class="day-label">Wed</text>
+    <text x="-28" y="79" class="day-label">Fri</text>
+    """
+
+    let svgWidth = numWeeks * 14 + 2
+    let svgHeight = 7 * 14 + 2
+
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+      @media (prefers-color-scheme: dark) {
+        body { background: #1e1e1e; color: #ccc; }
+        .level-0 { fill: #2d2d2d; }
+        .level-1 { fill: #0e4429; }
+        .level-2 { fill: #006d32; }
+        .level-3 { fill: #26a641; }
+        .level-4 { fill: #39d353; }
+        .legend-text { fill: #8b949e; }
+      }
+      @media (prefers-color-scheme: light) {
+        body { background: #fff; color: #333; }
+        .level-0 { fill: #ebedf0; }
+        .level-1 { fill: #9be9a8; }
+        .level-2 { fill: #40c463; }
+        .level-3 { fill: #30a14e; }
+        .level-4 { fill: #216e39; }
+        .legend-text { fill: #656d76; }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; height: 100vh; margin: 0; padding: 16px;
+        box-sizing: border-box;
+      }
+      h3 { font-size: 13px; font-weight: 600; margin: 0 0 12px 0; }
+      .month-label { font-size: 10px; fill: currentColor; }
+      .day-label { font-size: 10px; fill: currentColor; }
+      .legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; }
+      .legend svg rect { rx: 2; ry: 2; }
+    </style>
+    </head>
+    <body>
+      <h3>Claude Usage — Last 90 Days</h3>
+      <svg width="\(svgWidth + 36)" height="\(svgHeight + 20)">
+        <g transform="translate(34, 16)">
+          \(monthLabelsHTML)
+          \(dayLabelsHTML)
+          \(cellsHTML)
+        </g>
+      </svg>
+      <div class="legend">
+        <span class="legend-text">Less</span>
+        <svg width="11" height="11"><rect width="11" height="11" class="level-0"/></svg>
+        <svg width="11" height="11"><rect width="11" height="11" class="level-1"/></svg>
+        <svg width="11" height="11"><rect width="11" height="11" class="level-2"/></svg>
+        <svg width="11" height="11"><rect width="11" height="11" class="level-3"/></svg>
+        <svg width="11" height="11"><rect width="11" height="11" class="level-4"/></svg>
+        <span class="legend-text">More</span>
+      </div>
+    </body>
+    </html>
+    """
 }
 
 // MARK: - Claude Desktop cookie-based usage (claude-web-usage strategy)
@@ -437,9 +755,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Data-driven usage items: key -> menu item
     var usageItems: [String: NSMenuItem] = [:]
+    var rateItems: [String: NSMenuItem] = [:]
     var updatedItem: NSMenuItem!
     var rateLimitItem: NSMenuItem!
     var isRateLimited = false
+
+    // Usage graph
+    var graphPanel: NSPanel?
 
     // Which keys are pinned to the main menu
     var menuReady = false
@@ -482,6 +804,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
     var colorsItem: NSMenuItem!
+
+    // Rate insight toggle
+    var rateInsightEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(rateInsightEnabled, forKey: "rateInsightEnabled")
+            rateInsightItem?.state = rateInsightEnabled ? .on : .off
+            for (_, item) in rateItems { item.isHidden = !rateInsightEnabled }
+        }
+    }
+    var rateInsightItem: NSMenuItem!
 
     // Open at login toggle
     var openAtLoginEnabled: Bool = false {
@@ -563,6 +895,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
 
+        // Migrate usage history from UserDefaults to persistent file
+        migrateUserDefaultsHistory()
+
         // Load saved preferences
         let ud = UserDefaults.standard
         let savedInterval = ud.double(forKey: "refreshInterval")
@@ -582,6 +917,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ud.object(forKey: "colorsEnabled") != nil {
             colorsEnabled = ud.bool(forKey: "colorsEnabled")
         }
+        if ud.object(forKey: "rateInsightEnabled") != nil {
+            rateInsightEnabled = ud.bool(forKey: "rateInsightEnabled")
+        }
         if ud.object(forKey: "openAtLoginEnabled") != nil {
             openAtLoginEnabled = ud.bool(forKey: "openAtLoginEnabled")
         }
@@ -599,12 +937,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "..."
 
-        // Create usage menu items for all categories
+        // Create usage menu items and rate sub-items for all categories
         for key in allCategoryKeys {
             let label = categoryLabels[key] ?? key
             let item = NSMenuItem(title: "\(label): ...", action: #selector(noop), keyEquivalent: "")
             item.target = self
             usageItems[key] = item
+
+            let rateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            rateItem.isEnabled = false
+            rateItem.isHidden = true
+            rateItems[key] = rateItem
         }
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
         rateLimitItem = NSMenuItem(title: "Rate limited. Try again later.", action: nil, keyEquivalent: "")
@@ -808,16 +1151,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func buildMenu() {
         menu.removeAllItems()
 
-        // Pinned usage items (in canonical order)
+        // Pinned usage items with rate sub-items (in canonical order)
         for key in allCategoryKeys {
             if pinnedKeys.contains(key), let item = usageItems[key] {
                 menu.addItem(item)
+                if let rateItem = rateItems[key] {
+                    menu.addItem(rateItem)
+                }
             }
         }
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(rateLimitItem)
         menu.addItem(updatedItem)
+
+        let graphItem = NSMenuItem(title: "Usage Graph", action: #selector(showUsageGraph), keyEquivalent: "g")
+        graphItem.target = self
+        graphItem.keyEquivalentModifierMask = []
+        menu.addItem(graphItem)
 
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
         copyItem.target = self
@@ -860,6 +1211,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         colorsItem.target = self
         colorsItem.state = colorsEnabled ? .on : .off
         settingsMenu.addItem(colorsItem)
+
+        rateInsightItem = NSMenuItem(title: "Rate Insight", action: #selector(toggleRateInsight), keyEquivalent: "")
+        rateInsightItem.target = self
+        rateInsightItem.state = rateInsightEnabled ? .on : .off
+        settingsMenu.addItem(rateInsightItem)
 
         openAtLoginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
         openAtLoginItem.target = self
@@ -987,6 +1343,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let debugItem = NSMenuItem(title: "Debug Mode", action: nil, keyEquivalent: "")
         debugItem.submenu = debugMenu
         settingsMenu.addItem(debugItem)
+
+        let exportItem = NSMenuItem(title: "Export Data...", action: #selector(exportData), keyEquivalent: "")
+        exportItem.target = self
+        settingsMenu.addItem(exportItem)
 
         let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
@@ -1129,6 +1489,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func toggleColors() {
         colorsEnabled = !colorsEnabled
         refresh()
+    }
+
+    @objc func toggleRateInsight() {
+        rateInsightEnabled = !rateInsightEnabled
+        if rateInsightEnabled { refresh() }
+    }
+
+    @objc func showUsageGraph() {
+        if let existing = graphPanel {
+            existing.close()
+            graphPanel = nil
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 220),
+            styleMask: [.titled, .closable, .hudWindow, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Claude Usage — Last 90 Days"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.level = .floating
+        panel.center()
+
+        let webView = WKWebView(frame: panel.contentView!.bounds)
+        webView.autoresizingMask = [.width, .height]
+        webView.setValue(false, forKey: "drawsBackground")
+        panel.contentView?.addSubview(webView)
+
+        let html = generateHeatmapHTML()
+        webView.loadHTMLString(html, baseURL: nil)
+
+        panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        graphPanel = panel
     }
 
     @objc func recordHotkey() {
@@ -1324,6 +1720,29 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         NSPasteboard.general.setString(script, forType: .string)
     }
 
+    @objc func exportData() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "claude_usage_history.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        panel.begin { response in
+            defer { NSApp.setActivationPolicy(.accessory) }
+            guard response == .OK, let url = panel.url else { return }
+
+            let file = loadHistoryFile()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            guard let data = try? encoder.encode(file) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     @objc func quit() {
         NSApp.terminate(nil)
     }
@@ -1393,11 +1812,13 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         ])
     }
 
-    /// Calculate a green→yellow→red color based on usage pace.
-    /// ratio = usage% / time_elapsed%, where 1.0 means perfectly on track.
+    /// Projection-based color: "if I keep this average pace, what % will I hit at window end?"
+    /// Smooth hue interpolation from green (under budget) through yellow/orange to red (overshooting).
     func severityColor(utilization: Double, resetsAt: String?, windowSeconds: TimeInterval) -> NSColor? {
         guard colorsEnabled, utilization > 0 else { return nil }
-        if utilization >= 100 { return NSColor(calibratedHue: 0, saturation: 0.8, brightness: 1.0, alpha: 1.0) }
+        if utilization >= 100 {
+            return NSColor(calibratedHue: 0, saturation: 0.8, brightness: 1.0, alpha: 1.0)
+        }
 
         guard let resetStr = resetsAt,
               let resetDate = isoFormatter.date(from: resetStr) ?? isoFormatterNoFrac.date(from: resetStr) else {
@@ -1405,34 +1826,37 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
 
         let remaining = max(resetDate.timeIntervalSince(Date()), 0)
-        let elapsed = windowSeconds - remaining
-        let elapsedPct = max(elapsed / windowSeconds * 100, 1)
-        let ratio = utilization / elapsedPct
+        let elapsedFraction = max((windowSeconds - remaining) / windowSeconds, 0.10)
+        let projected = utilization / elapsedFraction
 
-        // High utilization + on-track burn → red (e.g. 99% with 2hrs left). Low utilization → cap at orange (e.g. 11% weekly).
-        let effectiveRatio: Double
-        if utilization < 20 {
-            effectiveRatio = min(ratio, 2.5)
-        } else {
-            effectiveRatio = ratio
-        }
-
-        // effectiveRatio <= 0.75: green, 0.75-1.0: yellow, 1.0-1.5: light orange, 1.5-2.5: dark orange. Red: (effectiveRatio >= 2.5 and utilization >= 20) OR (high utilization and ratio >= 1.0).
-        let hue: CGFloat
+        // Smooth hue interpolation based on projected end-of-window utilization.
+        //   projected <= 80  → hue 120° (green)
+        //   80–105           → 120°→55° (green to yellow)
+        //   105–140          → 55°→15° (yellow to orange)
+        //   > 140            → 0° (red)
+        var hue: CGFloat
         let saturation: CGFloat
         let brightness: CGFloat
-        let useRed = (effectiveRatio >= 2.5 && utilization >= 20) || (utilization >= 85 && ratio >= 1.0)
-        if useRed {
-            hue = 0; saturation = 0.8; brightness = 1.0
-        } else if effectiveRatio <= 0.75 {
-            hue = 120.0 / 360.0; saturation = 0.8; brightness = 1.0           // green
-        } else if effectiveRatio <= 1.0 {
-            hue = 55.0 / 360.0; saturation = 0.85; brightness = 1.0         // yellow
-        } else if effectiveRatio <= 1.5 {
-            hue = 35.0 / 360.0; saturation = 0.8; brightness = 1.0            // light orange
+
+        if projected <= 80 {
+            hue = 120.0 / 360.0
+            saturation = 0.8; brightness = 1.0
+        } else if projected <= 105 {
+            let t = CGFloat((projected - 80) / 25.0)
+            hue = CGFloat(120.0 - 65.0 * Double(t)) / 360.0
+            saturation = 0.8 + 0.05 * t; brightness = 1.0
+        } else if projected <= 140 {
+            let t = CGFloat((projected - 105) / 35.0)
+            hue = CGFloat(55.0 - 40.0 * Double(t)) / 360.0
+            saturation = 0.85 + 0.05 * t; brightness = 1.0 - 0.1 * t
         } else {
-            hue = 20.0 / 360.0; saturation = 0.9; brightness = 0.9            // dark orange
+            hue = 0; saturation = 0.9; brightness = 0.9
         }
+
+        // Absolute utilization overrides (tighten only, never relax)
+        if utilization >= 90 { hue = min(hue, 25.0 / 360.0) }
+        else if utilization >= 80 { hue = min(hue, 55.0 / 360.0) }
+
         return NSColor(calibratedHue: hue, saturation: saturation, brightness: brightness, alpha: 1.0)
     }
 
@@ -1441,6 +1865,45 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             .font: NSFont.menuFont(ofSize: 14),
             .foregroundColor: NSColor.secondaryLabelColor
         ])
+    }
+
+    func updateRateItem(key: String, utilization: Double, isWeekly: Bool) {
+        guard let item = rateItems[key] else { return }
+        guard rateInsightEnabled else {
+            item.isHidden = true
+            return
+        }
+        let rate = rateForCategory(key, currentUtil: utilization, isWeekly: isWeekly)
+
+        if isWeekly {
+            guard let perDay = rate.perDay else {
+                item.isHidden = true
+                return
+            }
+            let rateText = String(format: "  %.0f%%/day", perDay)
+            let full = "\(rateText) · \(rate.descriptor)"
+            let color = colorsEnabled ? rateDescriptorColor(rate.descriptor) : NSColor.secondaryLabelColor
+            item.attributedTitle = NSAttributedString(string: full, attributes: [
+                .font: NSFont.menuFont(ofSize: 12),
+                .foregroundColor: color
+            ])
+            item.title = full
+            item.isHidden = false
+        } else {
+            guard let perHour = rate.perHour else {
+                item.isHidden = true
+                return
+            }
+            let rateText = String(format: "  %.0f%%/hr", perHour)
+            let full = "\(rateText) · \(rate.descriptor)"
+            let color = colorsEnabled ? rateDescriptorColor(rate.descriptor) : NSColor.secondaryLabelColor
+            item.attributedTitle = NSAttributedString(string: full, attributes: [
+                .font: NSFont.menuFont(ofSize: 12),
+                .foregroundColor: color
+            ])
+            item.title = full
+            item.isHidden = false
+        }
     }
 
     func updateUsageItem(key: String, limit: UsageLimit?, windowSeconds: TimeInterval = 0) {
@@ -1454,9 +1917,14 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
                 ? severityColor(utilization: l.utilization, resetsAt: l.resets_at, windowSeconds: windowSeconds)
                 : nil
             item.attributedTitle = tabbedMenuItemString("\(label): \(pct)%", "resets \(reset)", color: color)
+
+            let isWeekly = key != "five_hour"
+            recordUsageSample(key, utilization: l.utilization)
+            updateRateItem(key: key, utilization: l.utilization, isWeekly: isWeekly)
         } else {
             item.title = "\(label): --"
             item.attributedTitle = nil
+            rateItems[key]?.isHidden = true
         }
     }
 
@@ -1486,16 +1954,19 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         updateUsageItem(key: "seven_day_oauth_apps", limit: usage.seven_day_oauth_apps, windowSeconds: 7 * 86400)
         updateUsageItem(key: "seven_day_cowork", limit: usage.seven_day_cowork, windowSeconds: 7 * 86400)
 
-        // Extra usage (special format)
+        // Extra usage (special format — monthly window, so treat as weekly-style for rate)
         if let e = usage.extra_usage, e.is_enabled,
            let used = e.used_credits, let limit = e.monthly_limit, let util = e.utilization {
             let extraText = String(format: "Extra: $%.2f/$%.0f", used / 100, limit / 100)
             let extraDetail = String(format: "%.0f%%", util)
             usageItems["extra_usage"]?.title = String(format: "Extra: $%.2f/$%.0f (%.0f%%)", used / 100, limit / 100, util)
             usageItems["extra_usage"]?.attributedTitle = tabbedMenuItemString(extraText, extraDetail)
+            recordUsageSample("extra_usage", utilization: util)
+            updateRateItem(key: "extra_usage", utilization: util, isWeekly: true)
         } else {
             usageItems["extra_usage"]?.title = "Extra: --"
             usageItems["extra_usage"]?.attributedTitle = nil
+            rateItems["extra_usage"]?.isHidden = true
         }
 
         // 5-hour specific: reset date, transitions, menu bar title
