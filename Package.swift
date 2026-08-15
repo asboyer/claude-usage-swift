@@ -27,7 +27,7 @@ let package = Package(
                 "graph",
                 "history"
             ],
-            sources: ["UsageCore.swift"]
+            sources: ["UsageCore.swift", "CodexUsageCore.swift"]
         ),
         .testTarget(
             name: "ClaudeUsageCoreTests",

@@ -1,13 +1,19 @@
 import Foundation
 
-let appVersion = "2.1.34"
+let appVersion = "2.2.0"
 let appAuthor = "asboyer"
 
-// All trackable usage categories.
-let allCategoryKeys: [String] = [
+// Claude usage categories.
+let claudeCategoryKeys: [String] = [
     "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet",
     "seven_day_oauth_apps", "seven_day_cowork", "extra_usage",
 ]
+
+// Codex usage categories. Codex only exposes a weekly limit window.
+let codexCategoryKeys: [String] = ["codex_weekly"]
+
+// All trackable usage categories.
+let allCategoryKeys: [String] = claudeCategoryKeys + codexCategoryKeys
 
 let categoryLabels: [String: String] = [
     "five_hour": "5-hour",
@@ -17,6 +23,14 @@ let categoryLabels: [String: String] = [
     "seven_day_oauth_apps": "OAuth Apps",
     "seven_day_cowork": "Cowork",
     "extra_usage": "Extra",
+    "codex_weekly": "Weekly",
 ]
 
-let defaultPinnedKeys: Set<String> = ["five_hour", "seven_day", "seven_day_sonnet", "extra_usage"]
+let providerSectionTitles: [UsageProvider: String] = [
+    .claude: "Claude",
+    .codex: "Codex",
+]
+
+let defaultPinnedKeys: Set<String> = [
+    "five_hour", "seven_day", "seven_day_sonnet", "extra_usage", "codex_weekly",
+]
