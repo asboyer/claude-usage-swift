@@ -26,6 +26,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/AppDelegate+MenuAndRefresh.swift \
     src/ClaudeUsage.swift \
     src/UsageCore.swift \
+    src/CodexUsageCore.swift \
     -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 
 # Create Info.plist
