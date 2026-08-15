@@ -96,6 +96,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var usageSourceCookiesItem: NSMenuItem!
     var usageSourceOAuthItem: NSMenuItem!
 
+    // Codex usage tracking
+    var codexTrackingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(codexTrackingEnabled, forKey: "codexTrackingEnabled")
+            codexTrackingItem?.state = codexTrackingEnabled ? .on : .off
+        }
+    }
+    var codexTrackingItem: NSMenuItem!
+
+    // Whether the last Codex fetch produced usage data.
+    var codexAvailable = false
+
+    // Status item text per provider, plus which provider currently owns the status item.
+    var claudeStatusText: String?
+    var codexStatusText: String?
+    var menuBarOwnership: MenuBarOwnership = .claudeDefault
+
     // Current interval in seconds
     var refreshInterval: TimeInterval = 300 {
         didSet {
@@ -189,9 +206,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             usageSource = 0 // default: Desktop cookies
         }
+        if ud.object(forKey: "codexTrackingEnabled") != nil {
+            codexTrackingEnabled = ud.bool(forKey: "codexTrackingEnabled")
+        }
+        menuBarOwnership = loadMenuBarOwnership()
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
-            pinnedKeys = Set(saved)
+            // Existing installs predate the Codex category, so pin it once on upgrade.
+            var restored = Set(saved)
+            if !ud.bool(forKey: "codexPinMigrated") {
+                restored.formUnion(codexCategoryKeys)
+                ud.set(true, forKey: "codexPinMigrated")
+            }
+            pinnedKeys = restored
+        } else {
+            ud.set(true, forKey: "codexPinMigrated")
         }
 
         // Create status item

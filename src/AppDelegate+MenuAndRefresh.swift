@@ -7,14 +7,11 @@ extension AppDelegate {
     func buildMenu() {
         menu.removeAllItems()
 
-        // Pinned usage items with rate sub-items (in canonical order)
-        for key in allCategoryKeys {
-            if pinnedKeys.contains(key), let item = usageItems[key] {
-                menu.addItem(item)
-                if let rateItem = rateItems[key] {
-                    menu.addItem(rateItem)
-                }
-            }
+        // Pinned usage items with rate sub-items, grouped by provider
+        let showsProviderSections = codexSectionVisible
+        addUsageSection(provider: .claude, keys: claudeCategoryKeys, showsHeader: showsProviderSections)
+        if showsProviderSections {
+            addUsageSection(provider: .codex, keys: codexCategoryKeys, showsHeader: true)
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -89,6 +86,15 @@ extension AppDelegate {
         let usageSourceItem = NSMenuItem(title: "Usage Source", action: nil, keyEquivalent: "")
         usageSourceItem.submenu = usageSourceMenu
         settingsMenu.addItem(usageSourceItem)
+
+        codexTrackingItem = NSMenuItem(
+            title: "Track Codex Usage",
+            action: #selector(toggleCodexTracking),
+            keyEquivalent: ""
+        )
+        codexTrackingItem.target = self
+        codexTrackingItem.state = codexTrackingEnabled ? .on : .off
+        settingsMenu.addItem(codexTrackingItem)
 
         // Keyboard Shortcut submenu
         let hotkeyMenu = NSMenu()
@@ -172,15 +178,8 @@ extension AppDelegate {
         // More submenu — all categories with checkmark = pinned
         moreMenu = NSMenu()
         moreToggleItems.removeAll()
-        for key in allCategoryKeys {
-            let label = categoryLabels[key] ?? key
-            let item = NSMenuItem(title: label, action: #selector(togglePin(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = key
-            item.state = pinnedKeys.contains(key) ? .on : .off
-            moreMenu.addItem(item)
-            moreToggleItems[key] = item
-        }
+        addMoreSection(provider: .claude, keys: claudeCategoryKeys)
+        addMoreSection(provider: .codex, keys: codexCategoryKeys)
         let moreItem = NSMenuItem(title: "More", action: nil, keyEquivalent: "")
         moreItem.submenu = moreMenu
         settingsMenu.addItem(moreItem)
@@ -196,6 +195,21 @@ extension AppDelegate {
         let debugCurlItem = NSMenuItem(title: "curl", action: #selector(copyDebugCurl), keyEquivalent: "")
         debugCurlItem.target = self
         debugMenu.addItem(debugCurlItem)
+        debugMenu.addItem(NSMenuItem.separator())
+        let debugCodexRequestItem = NSMenuItem(
+            title: "Codex Request",
+            action: #selector(copyCodexDebugRequest),
+            keyEquivalent: ""
+        )
+        debugCodexRequestItem.target = self
+        debugMenu.addItem(debugCodexRequestItem)
+        let debugCodexResponseItem = NSMenuItem(
+            title: "Codex Response",
+            action: #selector(copyCodexDebugResponse),
+            keyEquivalent: ""
+        )
+        debugCodexResponseItem.target = self
+        debugMenu.addItem(debugCodexResponseItem)
         let debugItem = NSMenuItem(title: "Debug Mode", action: nil, keyEquivalent: "")
         debugItem.submenu = debugMenu
         settingsMenu.addItem(debugItem)
@@ -256,6 +270,60 @@ extension AppDelegate {
 
     func rebuildMenu() {
         buildMenu()
+    }
+
+    // MARK: - Usage Sections
+
+    /// Codex rows only appear once a fetch has produced usage data.
+    var codexSectionVisible: Bool {
+        return codexTrackingEnabled && codexAvailable
+    }
+
+    func providerHeaderItem(_ provider: UsageProvider) -> NSMenuItem {
+        let title = providerSectionTitles[provider] ?? ""
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        return item
+    }
+
+    func addUsageSection(provider: UsageProvider, keys: [String], showsHeader: Bool) {
+        let sectionKeys = keys.filter { pinnedKeys.contains($0) }
+        guard !sectionKeys.isEmpty else { return }
+
+        if showsHeader {
+            if menu.numberOfItems > 0 {
+                menu.addItem(NSMenuItem.separator())
+            }
+            menu.addItem(providerHeaderItem(provider))
+        }
+        for key in sectionKeys {
+            guard let item = usageItems[key] else { continue }
+            menu.addItem(item)
+            if let rateItem = rateItems[key] {
+                menu.addItem(rateItem)
+            }
+        }
+    }
+
+    /// The More submenu always shows headers so same-named categories stay distinguishable.
+    func addMoreSection(provider: UsageProvider, keys: [String]) {
+        if moreMenu.numberOfItems > 0 {
+            moreMenu.addItem(NSMenuItem.separator())
+        }
+        moreMenu.addItem(providerHeaderItem(provider))
+        for key in keys {
+            let label = categoryLabels[key] ?? key
+            let item = NSMenuItem(title: label, action: #selector(togglePin(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            item.state = pinnedKeys.contains(key) ? .on : .off
+            moreMenu.addItem(item)
+            moreToggleItems[key] = item
+        }
     }
 
     // MARK: - Sleep/Wake
@@ -467,6 +535,20 @@ extension AppDelegate {
         usageSource = 1
     }
 
+    @objc func toggleCodexTracking() {
+        codexTrackingEnabled = !codexTrackingEnabled
+        guard codexTrackingEnabled else {
+            codexAvailable = false
+            codexStatusText = nil
+            menuBarOwnership.provider = .claude
+            saveMenuBarOwnership()
+            updateStatusItemTitle()
+            rebuildMenu()
+            return
+        }
+        refresh()
+    }
+
     func updateLoginItem() {
         if #available(macOS 13.0, *) {
             do {
@@ -537,9 +619,19 @@ extension AppDelegate {
     }
 
     @objc func copyUsage() {
-        let lines = allCategoryKeys
-            .filter { pinnedKeys.contains($0) }
-            .compactMap { usageItems[$0]?.title }
+        let includesCodex = codexSectionVisible
+        var lines: [String] = []
+
+        for provider in [UsageProvider.claude, UsageProvider.codex] where provider == .claude || includesCodex {
+            let keys = (provider == .claude ? claudeCategoryKeys : codexCategoryKeys)
+                .filter { pinnedKeys.contains($0) }
+            guard !keys.isEmpty else { continue }
+            if includesCodex {
+                lines.append(providerSectionTitles[provider] ?? "")
+            }
+            lines.append(contentsOf: keys.compactMap { usageItems[$0]?.title })
+        }
+
         let text = (lines + [updatedItem.title]).joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -553,6 +645,16 @@ extension AppDelegate {
     @objc func copyDebugResponse() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lastResponseForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyCodexDebugRequest() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastCodexRequestForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyCodexDebugResponse() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastCodexResponseForDebug ?? "", forType: .string)
     }
 
     @objc func copyDebugCurl() {
@@ -600,47 +702,70 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             statusItem.button?.title = "..."
         }
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let strongSelf = self else { return }
-            let source = strongSelf.usageSource
+        // Both providers are fetched together so status item ownership is resolved
+        // from one consistent pair of readings.
+        let group = DispatchGroup()
+        var claudeUsage: UsageResponse?
+        var claudeRateLimited = false
+        var codexUsage: CodexUsage?
 
-            if source == 0 {
-                fetchUsageViaClaudeDesktopCookies { usage in
-                    if let usage {
-                        DispatchQueue.main.async {
-                            self?.updateUI(usage: usage, rateLimited: false)
-                        }
-                        return
-                    }
+        group.enter()
+        fetchClaudeUsage { usage, rateLimited in
+            DispatchQueue.main.async {
+                claudeUsage = usage
+                claudeRateLimited = rateLimited
+                group.leave()
+            }
+        }
 
-                    guard let token = getOAuthToken() else {
-                        DispatchQueue.main.async {
-                            self?.hasData = false
-                            self?.statusItem.button?.title = "..."
-                        }
-                        return
-                    }
-
-                    fetchUsage(token: token) { usage, rateLimited in
-                        DispatchQueue.main.async {
-                            self?.updateUI(usage: usage, rateLimited: rateLimited)
-                        }
+        if codexTrackingEnabled {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                fetchCodexUsage { usage in
+                    DispatchQueue.main.async {
+                        codexUsage = usage
+                        group.leave()
                     }
                 }
-            } else {
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.updateUI(usage: claudeUsage, rateLimited: claudeRateLimited)
+            self.updateCodexUI(codexUsage)
+            self.updateMenuBarOwnership(claudeUsage: claudeUsage, codexUsage: codexUsage)
+            self.updateStatusItemTitle()
+        }
+    }
+
+    /// Fetches Claude usage from the selected source, falling back from desktop cookies to the OAuth API.
+    func fetchClaudeUsage(completion: @escaping (UsageResponse?, Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let strongSelf = self else {
+                completion(nil, false)
+                return
+            }
+
+            let fetchViaOAuth = {
                 guard let token = getOAuthToken() else {
-                    DispatchQueue.main.async {
-                        self?.hasData = false
-                        self?.statusItem.button?.title = "..."
-                    }
+                    completion(nil, false)
                     return
                 }
+                fetchUsage(token: token, completion: completion)
+            }
 
-                fetchUsage(token: token) { usage, rateLimited in
-                    DispatchQueue.main.async {
-                        self?.updateUI(usage: usage, rateLimited: rateLimited)
-                    }
+            guard strongSelf.usageSource == 0 else {
+                fetchViaOAuth()
+                return
+            }
+
+            fetchUsageViaClaudeDesktopCookies { usage in
+                guard let usage else {
+                    fetchViaOAuth()
+                    return
                 }
+                completion(usage, false)
             }
         }
     }
@@ -770,7 +895,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
 
         guard let usage else {
             hasData = false
-            statusItem.button?.title = "..."
+            claudeStatusText = nil
             return
         }
 
@@ -834,8 +959,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             }
 
             hasData = true
+            claudeStatusText = currentPct
             statusItem.length = NSStatusItem.variableLength
-            statusItem.button?.title = currentPct
         }
 
         if let extra = usage.extra_usage, let util = extra.utilization {
@@ -851,6 +976,97 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         let updatedText = "Updated: \(timeFormatter.string(from: Date()))\(stale)"
         updatedItem.title = updatedText
         updatedItem.attributedTitle = dimmedMenuItemString(updatedText)
+    }
+
+    // MARK: - Codex
+
+    func updateCodexUI(_ usage: CodexUsage?) {
+        let wasAvailable = codexAvailable
+
+        guard codexTrackingEnabled, let weekly = usage?.weekly else {
+            codexAvailable = false
+            codexStatusText = nil
+            for key in codexCategoryKeys {
+                usageItems[key]?.title = "\(categoryLabels[key] ?? key): --"
+                usageItems[key]?.attributedTitle = nil
+                rateItems[key]?.isHidden = true
+            }
+            rebuildMenuIfCodexVisibilityChanged(wasAvailable: wasAvailable)
+            return
+        }
+
+        codexAvailable = true
+        let limit = UsageLimit(
+            utilization: weekly.usedPercent,
+            resets_at: weekly.resetsAt.map { isoFormatter.string(from: $0) }
+        )
+        let windowSeconds = weekly.windowSeconds > 0 ? weekly.windowSeconds : CodexWindowSelector.weeklyWindowSeconds
+        updateUsageItem(key: "codex_weekly", limit: limit, windowSeconds: windowSeconds)
+
+        let pct = Int(weekly.usedPercent)
+        if pct >= 100, let resetDate = weekly.resetsAt {
+            codexStatusText = formatResetDate(resetDate)
+        } else {
+            codexStatusText = "\(pct)%"
+        }
+
+        rebuildMenuIfCodexVisibilityChanged(wasAvailable: wasAvailable)
+    }
+
+    private func rebuildMenuIfCodexVisibilityChanged(wasAvailable: Bool) {
+        guard menuReady, wasAvailable != codexAvailable else { return }
+        rebuildMenu()
+    }
+
+    // MARK: - Status Item
+
+    func updateMenuBarOwnership(claudeUsage: UsageResponse?, codexUsage: CodexUsage?) {
+        menuBarOwnership = MenuBarOwnershipResolver.resolve(
+            current: menuBarOwnership,
+            claudeUtilization: claudeUsage?.five_hour?.utilization,
+            codexUtilization: codexTrackingEnabled ? codexUsage?.weekly?.usedPercent : nil
+        )
+        saveMenuBarOwnership()
+    }
+
+    func updateStatusItemTitle() {
+        guard claudeStatusText != nil || codexStatusText != nil else {
+            statusItem.button?.title = "..."
+            return
+        }
+
+        if menuBarOwnership.provider == .codex, let codexStatusText {
+            statusItem.button?.title = codexStatusText
+            return
+        }
+        if let claudeStatusText {
+            statusItem.button?.title = claudeStatusText
+            return
+        }
+        if let codexStatusText {
+            statusItem.button?.title = codexStatusText
+        }
+    }
+
+    func loadMenuBarOwnership() -> MenuBarOwnership {
+        let defaults = UserDefaults.standard
+        let provider = UsageProvider(rawValue: defaults.string(forKey: "menuBarProvider") ?? "") ?? .claude
+        return MenuBarOwnership(
+            provider: provider,
+            lastClaudeUtilization: defaults.object(forKey: "menuBarLastClaudeUtil") as? Double,
+            lastCodexUtilization: defaults.object(forKey: "menuBarLastCodexUtil") as? Double
+        )
+    }
+
+    func saveMenuBarOwnership() {
+        let defaults = UserDefaults.standard
+        defaults.set(menuBarOwnership.provider.rawValue, forKey: "menuBarProvider")
+        if let lastClaude = menuBarOwnership.lastClaudeUtilization {
+            defaults.set(lastClaude, forKey: "menuBarLastClaudeUtil")
+        }
+        if let lastCodex = menuBarOwnership.lastCodexUtilization {
+            defaults.set(lastCodex, forKey: "menuBarLastCodexUtil")
+        }
     }
 
     func isDataStale() -> Bool {
