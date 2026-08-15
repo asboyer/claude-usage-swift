@@ -1,6 +1,6 @@
 # Claude Usage Tracker (Swift)
 
-A lightweight native macOS menu bar app that displays your Claude usage limits and reset times.
+A lightweight native macOS menu bar app that displays your Claude and OpenAI Codex usage limits and reset times.
 
 ![macOS](https://img.shields.io/badge/macOS-13.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
@@ -11,6 +11,8 @@ A lightweight native macOS menu bar app that displays your Claude usage limits a
 | Feature | Description |
 | ------- | ----------- |
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
+| **Codex usage** | Tracks your Codex weekly limit alongside Claude, listed under its own heading in the dropdown. |
+| **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
 | **Global hotkey** | Press `Cmd+Shift+X` from anywhere to open the menu (customizable in Settings). |
 | **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `g` usage graph, `x` close. |
@@ -130,6 +132,32 @@ Uses the same approach as [claude-web-usage](https://github.com/skibidiskib/clau
 
 The usage APIs are metadata-only — no inference tokens are consumed.
 
+### Codex usage
+
+Codex is fetched independently of Claude on the same refresh cycle, and only exposes a weekly limit window:
+
+1. Reads the OAuth access token from `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`)
+2. Calls `https://chatgpt.com/backend-api/wham/usage` with `Authorization: Bearer <token>`
+3. Selects the seven-day window from the response — plans report it as either the primary or secondary window, so it is matched by window length rather than position
+4. If the token is missing or rejected (for example, expired), falls back to the most recent `rate_limits` payload Codex CLI wrote into `~/.codex/sessions/`
+
+The fallback data is only as fresh as your last Codex run, so re-running `codex` refreshes both the token and the local data.
+
+**Requires**: Codex CLI installed and logged in. If neither the token nor local sessions are available, the Codex section is hidden and the app behaves exactly as before.
+
+> The Codex usage endpoint is an internal, undocumented ChatGPT API. It is not covered by any stability guarantee and its shape may change.
+
+### Which provider the menu bar shows
+
+The menu bar tracks whichever provider most recently consumed usage:
+
+- When Claude's 5-hour utilization increases, the menu bar switches to Claude
+- When Codex's weekly utilization increases, it switches to Codex
+- If both increased since the last refresh, the larger jump wins
+- Utilization *drops* mean a limit window reset, so they never change which provider is shown
+
+The menu bar shows the percentage on its own, with no provider label. Open the dropdown to see both providers broken out.
+
 ## Settings
 
 All settings are accessible from the **Settings** submenu:
@@ -147,8 +175,9 @@ All settings are accessible from the **Settings** submenu:
 - **Keyboard Shortcut** — global hotkey to open the menu (default: `Cmd+Shift+X`)
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
-- **More** — pin or unpin categories (5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra)
-- **Debug Mode** — copy the latest request or response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
+- **Track Codex Usage** — fetch and display Codex weekly usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
+- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra — Codex: Weekly)
+- **Debug Mode** — copy the latest Claude or Codex request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
 
 ## Data Storage
@@ -163,6 +192,8 @@ This location is outside the app bundle, so your data survives app updates, dele
 
 - **Rolling samples** — recent utilization readings per category (used for rate calculations)
 - **Daily summaries** — one peak-utilization entry per day per category (used for the usage graph and long-term tracking)
+
+Codex history is stored in the same file under the `codex_weekly` category.
 
 On first launch, any existing usage data from the app's previous UserDefaults storage is automatically migrated to this file.
 
@@ -193,6 +224,16 @@ The app may ask for access to Keychain items **Claude Code-credentials** (OAuth)
 1. Delete old credentials: `security delete-generic-password -s "Claude Code-credentials"`
 2. Run `claude setup-token` to get a fresh token
 3. Restart the app
+
+### Codex usage is missing
+
+The Codex section only appears once a fetch returns data. Check, in order:
+
+1. `~/.codex/auth.json` exists (run `codex` and sign in if not)
+2. Settings → **Track Codex Usage** is checked
+3. Settings → Debug Mode → **Codex Response** shows the API reply — a 401 there means the token expired, and re-running `codex` refreshes it
+
+Until the token is refreshed the app falls back to your most recent local Codex session, which may lag behind actual usage.
 
 ### App won't open (macOS security)
 

@@ -28,6 +28,7 @@ Use subfolders for shared functionality:
 
 - `src/api/`
   - network/API models, request logic, auth/token access
+  - one file per upstream provider (`ClaudeDesktopUsageAPI`, `OAuthUsageAPI`, `CodexUsageAPI`)
 - `src/graph/`
   - usage graph/heatmap generation and related rendering logic
 - `src/history/`
@@ -56,6 +57,9 @@ When adding a new file, place it by responsibility:
    - `src/history/`
 5. **Cross-cutting pure domain logic**
    - `src/` root (or `src/core` if a future split is introduced)
+   - files compiled into the testable `ClaudeUsageCore` target must also be added to
+     `Package.swift` under the target's `sources` list (`UsageCore.swift`,
+     `CodexUsageCore.swift`)
 6. **Unit tests**
    - `tests/<TargetName>/`
 
