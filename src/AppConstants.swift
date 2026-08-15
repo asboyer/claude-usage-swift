@@ -1,6 +1,6 @@
 import Foundation
 
-let appVersion = "2.1.34"
+let appVersion = "2.2.0"
 let appAuthor = "asboyer"
 
 // Claude usage categories.
