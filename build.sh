@@ -21,6 +21,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/graph/UsageHeatmap.swift \
     src/api/ClaudeDesktopUsageAPI.swift \
     src/api/OAuthUsageAPI.swift \
+    src/api/CodexUsageAPI.swift \
     src/TimeFormatting.swift \
     src/SoundPlayback.swift \
     src/AppDelegate+MenuAndRefresh.swift \
