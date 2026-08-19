@@ -8,6 +8,33 @@ struct UsageResponse: Codable {
     let seven_day_oauth_apps: UsageLimit?
     let seven_day_cowork: UsageLimit?
     let extra_usage: ExtraUsage?
+    let limits: [LimitEntry]?
+}
+
+struct LimitEntry: Codable {
+    let kind: String?
+    let percent: Double?
+    let resets_at: String?
+    let scope: Scope?
+
+    struct Scope: Codable {
+        let model: Model?
+
+        struct Model: Codable {
+            let display_name: String?
+        }
+    }
+}
+
+/// The weekly per-model limit (Fable, Opus, ...) arrives in `limits`, not in a `seven_day_<model>` field.
+func scopedWeeklyLimit(_ usage: UsageResponse) -> (label: String?, limit: UsageLimit)? {
+    guard
+        let entry = usage.limits?.first(where: { $0.kind == "weekly_scoped" }),
+        let percent = entry.percent
+    else {
+        return nil
+    }
+    return (entry.scope?.model?.display_name, UsageLimit(utilization: percent, resets_at: entry.resets_at))
 }
 
 func detectModel(_ usage: UsageResponse) -> String {
