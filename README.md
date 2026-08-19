@@ -20,6 +20,7 @@ A lightweight native macOS menu bar app that displays your Claude and OpenAI Cod
 | **Rate Insight** | Optional per-category usage rate (%/hr or %/day) with descriptors: *light*, *steady*, *fast*, *heavy*, *extreme*. |
 | **Usage Graph** | GitHub-contribution-style 90-day heatmap of your daily peak usage, rendered in a floating panel. Press `g` to open. |
 | **5-hour & weekly limits** | Utilization plus countdown to reset for each window. |
+| **Per-model weekly limit** | Shows the weekly limit scoped to the model you're using (e.g. Fable), labeled with the name the API reports. |
 | **Auto-refresh** | Poll every 1, 5, 30, or 60 minutes. |
 | **Open at Login** | Start the app when you log in to your Mac. |
 | **Persistent history** | Usage data stored in `~/Library/Application Support/ClaudeUsage/` — survives app updates and reinstalls. |
