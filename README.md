@@ -179,6 +179,7 @@ All settings are accessible from the **Settings** submenu:
 - **Usage Source** — how to fetch usage:
   - **Use Desktop Cookies (recommended)** — Claude Desktop web session; avoids OAuth usage API rate limits; falls back to OAuth if cookies aren't available
   - **Use OAuth API** — only `api.anthropic.com/api/oauth/usage` (may hit 429 when rate limited)
+- **Always Show Extra Usage** — keep the **Extra** row visible at all times. Off by default, so the row appears only once the per-model weekly limit hits 100% and starts billing credits.
 - **Colors** — toggle projection-based color coding:
   - **Green** (projected ≤80%) — on pace to finish well under 100%
   - **Yellow** (projected 80–105%) — might reach 100%
@@ -189,7 +190,7 @@ All settings are accessible from the **Settings** submenu:
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **Track Codex Usage** — fetch and display Codex weekly usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
-- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Opus, Sonnet, OAuth Apps, Cowork, Extra — Codex: Weekly)
+- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: Weekly)
 - **Debug Mode** — copy the latest Claude or Codex request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
 

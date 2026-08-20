@@ -176,3 +176,15 @@ enum StatusDisplayModeSelector {
         return previous
     }
 }
+
+// MARK: - Extra Usage Row Visibility
+
+enum ExtraUsageRowVisibility {
+    /// The Extra row is noise while the scoped weekly limit still has room, so by
+    /// default it appears only once that limit is spent and starts billing credits.
+    static func shouldShow(alwaysShow: Bool, scopedWeeklyUtilization: Double?) -> Bool {
+        if alwaysShow { return true }
+        guard let scopedWeeklyUtilization else { return false }
+        return scopedWeeklyUtilization >= 100
+    }
+}

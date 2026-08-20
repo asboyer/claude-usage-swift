@@ -76,6 +76,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var rateInsightItem: NSMenuItem!
 
+    // Always show the Extra row, instead of only once the scoped weekly limit is spent
+    var alwaysShowExtraUsageEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(alwaysShowExtraUsageEnabled, forKey: "alwaysShowExtraUsageEnabled")
+            alwaysShowExtraUsageItem?.state = alwaysShowExtraUsageEnabled ? .on : .off
+        }
+    }
+    var alwaysShowExtraUsageItem: NSMenuItem!
+
     // Open at login toggle
     var openAtLoginEnabled: Bool = false {
         didSet {
@@ -163,6 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var previousFiveHourUtil: Double = -1
     var previousExtraUtil: Double = -1
     var previousSpentCredits: Double?
+    var lastScopedWeeklyUtilization: Double?
     var statusDisplayMode: StatusDisplayMode = .percentage
     var lastKnownResetDate: Date?
     var lastSessionFinalUtil: Double = 0
@@ -199,6 +209,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if ud.object(forKey: "rateInsightEnabled") != nil {
             rateInsightEnabled = ud.bool(forKey: "rateInsightEnabled")
+        }
+        if ud.object(forKey: "alwaysShowExtraUsageEnabled") != nil {
+            alwaysShowExtraUsageEnabled = ud.bool(forKey: "alwaysShowExtraUsageEnabled")
         }
         if ud.object(forKey: "openAtLoginEnabled") != nil {
             openAtLoginEnabled = ud.bool(forKey: "openAtLoginEnabled")
@@ -251,6 +264,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
         rateLimitItem = NSMenuItem(title: "Rate limited. Try again later.", action: nil, keyEquivalent: "")
         rateLimitItem.isEnabled = false
+
+        applyExtraUsageRowVisibility()
 
         // Build the full menu
         menu = NSMenu()

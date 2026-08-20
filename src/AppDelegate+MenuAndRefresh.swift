@@ -70,6 +70,15 @@ extension AppDelegate {
         rateInsightItem.state = rateInsightEnabled ? .on : .off
         settingsMenu.addItem(rateInsightItem)
 
+        alwaysShowExtraUsageItem = NSMenuItem(
+            title: "Always Show Extra Usage",
+            action: #selector(toggleAlwaysShowExtraUsage),
+            keyEquivalent: ""
+        )
+        alwaysShowExtraUsageItem.target = self
+        alwaysShowExtraUsageItem.state = alwaysShowExtraUsageEnabled ? .on : .off
+        settingsMenu.addItem(alwaysShowExtraUsageItem)
+
         openAtLoginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
         openAtLoginItem.target = self
         openAtLoginItem.state = openAtLoginEnabled ? .on : .off
@@ -420,6 +429,11 @@ extension AppDelegate {
         if rateInsightEnabled { refresh() }
     }
 
+    @objc func toggleAlwaysShowExtraUsage() {
+        alwaysShowExtraUsageEnabled = !alwaysShowExtraUsageEnabled
+        applyExtraUsageRowVisibility()
+    }
+
     @objc func showUsageGraph() {
         if let existing = graphPanel {
             existing.close()
@@ -629,7 +643,7 @@ extension AppDelegate {
             if includesCodex {
                 lines.append(providerSectionTitles[provider] ?? "")
             }
-            lines.append(contentsOf: keys.compactMap { usageItems[$0]?.title })
+            lines.append(contentsOf: keys.compactMap { usageItems[$0] }.filter { !$0.isHidden }.map { $0.title })
         }
 
         let text = (lines + [updatedItem.title]).joined(separator: "\n")
@@ -889,7 +903,20 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             dynamicCategoryLabels[scopedWeeklyKey] = label
             moreToggleItems[scopedWeeklyKey]?.title = label
         }
+        lastScopedWeeklyUtilization = scoped?.limit.utilization
         updateUsageItem(key: scopedWeeklyKey, limit: scoped?.limit, windowSeconds: 7 * 86400)
+    }
+
+    /// Hides the Extra row until the scoped weekly limit is spent, unless pinned open by the setting.
+    func applyExtraUsageRowVisibility() {
+        let shouldShow = ExtraUsageRowVisibility.shouldShow(
+            alwaysShow: alwaysShowExtraUsageEnabled,
+            scopedWeeklyUtilization: lastScopedWeeklyUtilization
+        )
+        usageItems["extra_usage"]?.isHidden = !shouldShow
+        if !shouldShow {
+            rateItems["extra_usage"]?.isHidden = true
+        }
     }
 
     func updateUI(usage: UsageResponse?, rateLimited: Bool = false) {
@@ -990,6 +1017,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             }
             previousExtraUtil = util
         }
+
+        applyExtraUsageRowVisibility()
 
         let stale = isDataStale() ? " (stale)" : ""
         let updatedText = "Updated: \(timeFormatter.string(from: Date()))\(stale)"

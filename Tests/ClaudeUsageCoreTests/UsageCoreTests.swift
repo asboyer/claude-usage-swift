@@ -231,4 +231,33 @@ final class UsageCoreTests: XCTestCase {
         let mode = selectMode(util: 40, priorUtil: nil, spent: 250, priorSpent: nil)
         XCTAssertEqual(mode, .percentage)
     }
+
+    // MARK: - Extra Usage Row Visibility
+
+    func testExtraRowHiddenWhileScopedWeeklyHasRoom() {
+        XCTAssertFalse(
+            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: 70)
+        )
+    }
+
+    func testExtraRowShownWhenScopedWeeklyIsSpent() {
+        XCTAssertTrue(
+            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: 100)
+        )
+    }
+
+    func testExtraRowHiddenWithoutScopedWeeklyData() {
+        XCTAssertFalse(
+            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: nil)
+        )
+    }
+
+    func testAlwaysShowOverridesScopedWeekly() {
+        XCTAssertTrue(
+            ExtraUsageRowVisibility.shouldShow(alwaysShow: true, scopedWeeklyUtilization: 0)
+        )
+        XCTAssertTrue(
+            ExtraUsageRowVisibility.shouldShow(alwaysShow: true, scopedWeeklyUtilization: nil)
+        )
+    }
 }
