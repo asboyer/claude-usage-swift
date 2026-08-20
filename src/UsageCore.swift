@@ -148,3 +148,31 @@ enum UsageRateCalculator {
         return "extreme"
     }
 }
+
+// MARK: - Status Bar Display Mode
+
+/// What the menu bar shows: the five-hour percentage, or the overage dollars.
+enum StatusDisplayMode: String, Equatable {
+    case percentage
+    case overage
+}
+
+enum StatusDisplayModeSelector {
+    /// Overage takes over the menu bar as soon as paid credits tick up — a scoped
+    /// weekly limit can start billing while every percentage is still under 100 —
+    /// and hands it back once the five-hour percentage moves again.
+    static func select(
+        previous: StatusDisplayMode,
+        fiveHourUtilization: Double,
+        previousFiveHourUtilization: Double?,
+        spentCredits: Double?,
+        previousSpentCredits: Double?
+    ) -> StatusDisplayMode {
+        guard let spentCredits else { return .percentage }
+        if let previousSpentCredits, spentCredits > previousSpentCredits { return .overage }
+        if let previousFiveHourUtilization, fiveHourUtilization > previousFiveHourUtilization {
+            return .percentage
+        }
+        return previous
+    }
+}

@@ -947,6 +947,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             }
 
             let newUtil = fiveHour.utilization
+            let priorUtil = previousFiveHourUtil >= 0 ? previousFiveHourUtil : nil
             if previousFiveHourUtil >= 0 && previousFiveHourUtil < 100 && newUtil >= 100 {
                 if alert100Enabled {
                     playClicks(count: 2, soundName: selectedSoundName)
@@ -956,14 +957,22 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             previousSessionHadUsage = newUtil > 0
             previousFiveHourUtil = newUtil
 
+            let extra = usage.extra_usage
+            let spent = (extra?.is_enabled == true) ? extra?.used_credits : nil
+            statusDisplayMode = StatusDisplayModeSelector.select(
+                previous: statusDisplayMode,
+                fiveHourUtilization: newUtil,
+                previousFiveHourUtilization: priorUtil,
+                spentCredits: spent,
+                previousSpentCredits: previousSpentCredits
+            )
+            previousSpentCredits = spent
+
             let excl = alarmCondition != 0 ? "!" : ""
-            if pct >= 100 {
-                if let extra = usage.extra_usage, extra.is_enabled, let spent = extra.used_credits {
-                    let dollars = spent / 100
-                    currentPct = String(format: "$%.2f%@", dollars, excl)
-                } else {
-                    currentPct = "\(reset)\(excl)"
-                }
+            if let spent, statusDisplayMode == .overage || pct >= 100 {
+                currentPct = String(format: "$%.2f%@", spent / 100, excl)
+            } else if pct >= 100 {
+                currentPct = "\(reset)\(excl)"
             } else {
                 currentPct = "\(pct)%"
             }

@@ -177,4 +177,58 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertEqual(rate.perHour ?? 0, 20, accuracy: 0.1)
         XCTAssertEqual(rate.descriptor, "steady")
     }
+
+    // MARK: - Status Bar Display Mode
+
+    private func selectMode(
+        previous: StatusDisplayMode = .percentage,
+        util: Double,
+        priorUtil: Double?,
+        spent: Double?,
+        priorSpent: Double?
+    ) -> StatusDisplayMode {
+        return StatusDisplayModeSelector.select(
+            previous: previous,
+            fiveHourUtilization: util,
+            previousFiveHourUtilization: priorUtil,
+            spentCredits: spent,
+            previousSpentCredits: priorSpent
+        )
+    }
+
+    func testRisingOverageTakesOverBelowFullUtilization() {
+        let mode = selectMode(util: 70, priorUtil: 70, spent: 250, priorSpent: 100)
+        XCTAssertEqual(mode, .overage)
+    }
+
+    func testRisingOverageWinsWhenUtilizationAlsoRises() {
+        let mode = selectMode(util: 72, priorUtil: 70, spent: 250, priorSpent: 100)
+        XCTAssertEqual(mode, .overage)
+    }
+
+    func testRisingUtilizationReclaimsMenuBarFromOverage() {
+        let mode = selectMode(previous: .overage, util: 42, priorUtil: 40, spent: 250, priorSpent: 250)
+        XCTAssertEqual(mode, .percentage)
+    }
+
+    func testFlatUsageKeepsCurrentMode() {
+        XCTAssertEqual(
+            selectMode(previous: .overage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
+            .overage
+        )
+        XCTAssertEqual(
+            selectMode(previous: .percentage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
+            .percentage
+        )
+    }
+
+    func testMissingSpendFallsBackToPercentage() {
+        let mode = selectMode(previous: .overage, util: 40, priorUtil: 40, spent: nil, priorSpent: 250)
+        XCTAssertEqual(mode, .percentage)
+    }
+
+    func testFirstFetchShowsPercentage() {
+        let mode = selectMode(util: 40, priorUtil: nil, spent: 250, priorSpent: nil)
+        XCTAssertEqual(mode, .percentage)
+    }
 }

@@ -13,6 +13,7 @@ A lightweight native macOS menu bar app that displays your Claude and OpenAI Cod
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
 | **Codex usage** | Tracks your Codex weekly limit alongside Claude, listed under its own heading in the dropdown. |
 | **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
+| **Surfaces overage spend** | When extra usage credits tick up, the menu bar shows dollars spent instead of a percentage. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
 | **Global hotkey** | Press `Cmd+Shift+X` from anywhere to open the menu (customizable in Settings). |
 | **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `g` usage graph, `x` close. |
@@ -158,6 +159,17 @@ The menu bar tracks whichever provider most recently consumed usage:
 - Utilization *drops* mean a limit window reset, so they never change which provider is shown
 
 The menu bar shows the percentage on its own, with no provider label. Open the dropdown to see both providers broken out.
+
+### When the menu bar shows dollars instead of a percentage
+
+Hitting a per-model weekly limit (Fable, Opus, ...) starts billing extra usage while
+every percentage is still under 100, so a percentage alone can hide the fact that
+you are paying. Claude's menu bar text follows whichever of the two moved last:
+
+- When extra usage credits increase, the menu bar switches to the amount spent, e.g. `$4.20`
+- When the 5-hour percentage increases and credits held flat, it switches back to the percentage
+- If both increased since the last refresh, the dollar amount wins
+- At 100% of the 5-hour limit the dollar amount is shown whenever extra usage is enabled, otherwise the reset time
 
 ## Settings
 

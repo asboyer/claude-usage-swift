@@ -162,6 +162,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Transition tracking
     var previousFiveHourUtil: Double = -1
     var previousExtraUtil: Double = -1
+    var previousSpentCredits: Double?
+    var statusDisplayMode: StatusDisplayMode = .percentage
     var lastKnownResetDate: Date?
     var lastSessionFinalUtil: Double = 0
     var previousSessionHadUsage: Bool = false
