@@ -316,7 +316,7 @@ extension AppDelegate {
         }
         moreMenu.addItem(providerHeaderItem(provider))
         for key in keys {
-            let label = categoryLabels[key] ?? key
+            let label = categoryLabel(for: key)
             let item = NSMenuItem(title: label, action: #selector(togglePin(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = key
@@ -863,7 +863,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
 
     func updateUsageItem(key: String, limit: UsageLimit?, windowSeconds: TimeInterval = 0) {
         guard let item = usageItems[key] else { return }
-        let label = categoryLabels[key] ?? key
+        let label = categoryLabel(for: key)
         if let limit {
             let pct = Int(limit.utilization)
             let reset = limit.resets_at.map { formatReset($0) } ?? "--"
@@ -881,6 +881,15 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             item.attributedTitle = nil
             rateItems[key]?.isHidden = true
         }
+    }
+
+    /// The scoped weekly row is labeled by the API, so its title has to follow the fetched model name.
+    func updateScopedWeeklyItem(_ scoped: (label: String?, limit: UsageLimit)?) {
+        if let label = scoped?.label {
+            dynamicCategoryLabels[scopedWeeklyKey] = label
+            moreToggleItems[scopedWeeklyKey]?.title = label
+        }
+        updateUsageItem(key: scopedWeeklyKey, limit: scoped?.limit, windowSeconds: 7 * 86400)
     }
 
     func updateUI(usage: UsageResponse?, rateLimited: Bool = false) {
@@ -902,6 +911,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         lastFetchDate = Date()
         updateUsageItem(key: "five_hour", limit: usage.five_hour, windowSeconds: 5 * 3600)
         updateUsageItem(key: "seven_day", limit: usage.seven_day, windowSeconds: 7 * 86400)
+        updateScopedWeeklyItem(scopedWeeklyLimit(usage))
         updateUsageItem(key: "seven_day_opus", limit: usage.seven_day_opus, windowSeconds: 7 * 86400)
         updateUsageItem(key: "seven_day_sonnet", limit: usage.seven_day_sonnet, windowSeconds: 7 * 86400)
         updateUsageItem(key: "seven_day_oauth_apps", limit: usage.seven_day_oauth_apps, windowSeconds: 7 * 86400)
@@ -987,7 +997,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             codexAvailable = false
             codexStatusText = nil
             for key in codexCategoryKeys {
-                usageItems[key]?.title = "\(categoryLabels[key] ?? key): --"
+                usageItems[key]?.title = "\(categoryLabel(for: key)): --"
                 usageItems[key]?.attributedTitle = nil
                 rateItems[key]?.isHidden = true
             }

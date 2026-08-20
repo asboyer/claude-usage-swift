@@ -218,9 +218,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 restored.formUnion(codexCategoryKeys)
                 ud.set(true, forKey: "codexPinMigrated")
             }
+            // The API replaced the per-model weekly fields with a single scoped limit.
+            if !ud.bool(forKey: "scopedWeeklyPinMigrated") {
+                restored.insert(scopedWeeklyKey)
+                restored.remove("seven_day_sonnet")
+                ud.set(true, forKey: "scopedWeeklyPinMigrated")
+            }
             pinnedKeys = restored
         } else {
             ud.set(true, forKey: "codexPinMigrated")
+            ud.set(true, forKey: "scopedWeeklyPinMigrated")
         }
 
         // Create status item
@@ -229,7 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Create usage menu items and rate sub-items for all categories
         for key in allCategoryKeys {
-            let label = categoryLabels[key] ?? key
+            let label = categoryLabel(for: key)
             let item = NSMenuItem(title: "\(label): ...", action: #selector(noop), keyEquivalent: "")
             item.target = self
             usageItems[key] = item
