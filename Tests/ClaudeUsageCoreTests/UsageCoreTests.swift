@@ -234,30 +234,52 @@ final class UsageCoreTests: XCTestCase {
 
     // MARK: - Extra Usage Row Visibility
 
-    func testExtraRowHiddenWhileScopedWeeklyHasRoom() {
-        XCTAssertFalse(
-            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: 70)
+    private func shouldShowRow(
+        alwaysShow: Bool = false,
+        spent: Double?,
+        scopedWeekly: Double?
+    ) -> Bool {
+        return ExtraUsageRowVisibility.shouldShow(
+            alwaysShow: alwaysShow,
+            spentCredits: spent,
+            scopedWeeklyUtilization: scopedWeekly
         )
     }
 
-    func testExtraRowShownWhenScopedWeeklyIsSpent() {
-        XCTAssertTrue(
-            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: 100)
-        )
+    func testExtraRowShownWhenCreditsAccrueBelowFullScopedWeekly() {
+        XCTAssertTrue(shouldShowRow(spent: 73333, scopedWeekly: 70))
     }
 
-    func testExtraRowHiddenWithoutScopedWeeklyData() {
-        XCTAssertFalse(
-            ExtraUsageRowVisibility.shouldShow(alwaysShow: false, scopedWeeklyUtilization: nil)
-        )
+    func testExtraRowHiddenWithNoSpendAndScopedWeeklyRoom() {
+        XCTAssertFalse(shouldShowRow(spent: 0, scopedWeekly: 70))
     }
 
-    func testAlwaysShowOverridesScopedWeekly() {
-        XCTAssertTrue(
-            ExtraUsageRowVisibility.shouldShow(alwaysShow: true, scopedWeeklyUtilization: 0)
-        )
-        XCTAssertTrue(
-            ExtraUsageRowVisibility.shouldShow(alwaysShow: true, scopedWeeklyUtilization: nil)
-        )
+    func testExtraRowShownAtFullScopedWeeklyBeforeAnySpend() {
+        XCTAssertTrue(shouldShowRow(spent: 0, scopedWeekly: 100))
+    }
+
+    func testExtraRowHiddenWhenExtraUsageUnavailable() {
+        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: 70))
+        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: nil))
+    }
+
+    func testAlwaysShowOverridesEverything() {
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: 0, scopedWeekly: 0))
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: nil, scopedWeekly: nil))
+    }
+
+    // MARK: - Extra Usage Credits
+
+    func testFormatCreditsUsesReportedDecimalPlaces() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: 2), "$733.33")
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(500, decimalPlaces: 0), "$500")
+    }
+
+    func testFormatCreditsDefaultsToTwoDecimalPlaces() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: nil), "$733.33")
+    }
+
+    func testFormatCreditsHandlesZero() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(0, decimalPlaces: 2), "$0.00")
     }
 }

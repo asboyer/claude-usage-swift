@@ -907,10 +907,11 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         updateUsageItem(key: scopedWeeklyKey, limit: scoped?.limit, windowSeconds: 7 * 86400)
     }
 
-    /// Hides the Extra row until the scoped weekly limit is spent, unless pinned open by the setting.
+    /// Hides the Extra row until credits are actually accruing, unless pinned open by the setting.
     func applyExtraUsageRowVisibility() {
         let shouldShow = ExtraUsageRowVisibility.shouldShow(
             alwaysShow: alwaysShowExtraUsageEnabled,
+            spentCredits: lastSpentCredits,
             scopedWeeklyUtilization: lastScopedWeeklyUtilization
         )
         usageItems["extra_usage"]?.isHidden = !shouldShow
@@ -944,15 +945,22 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         updateUsageItem(key: "seven_day_oauth_apps", limit: usage.seven_day_oauth_apps, windowSeconds: 7 * 86400)
         updateUsageItem(key: "seven_day_cowork", limit: usage.seven_day_cowork, windowSeconds: 7 * 86400)
 
-        if let extra = usage.extra_usage, extra.is_enabled,
-           let used = extra.used_credits, let limit = extra.monthly_limit, let util = extra.utilization {
-            let extraText = String(format: "Extra: $%.2f/$%.0f", used / 100, limit / 100)
-            let extraDetail = String(format: "%.0f%%", util)
-            usageItems["extra_usage"]?.title = String(format: "Extra: $%.2f/$%.0f (%.0f%%)", used / 100, limit / 100, util)
-            usageItems["extra_usage"]?.attributedTitle = tabbedMenuItemString(extraText, extraDetail)
-            recordUsageSample("extra_usage", utilization: util)
-            updateRateItem(key: "extra_usage", utilization: util, isWeekly: true)
+        // `monthly_limit` and `utilization` are null on plans that only meter spend, so the
+        // row needs `used_credits` alone.
+        if let extra = usage.extra_usage, extra.is_enabled, let used = extra.used_credits {
+            lastSpentCredits = used
+            let label = categoryLabel(for: "extra_usage")
+            let spendText = ExtraUsageFormatter.formatCredits(used, decimalPlaces: extra.decimal_places)
+            usageItems["extra_usage"]?.title = "\(label): \(spendText)"
+            usageItems["extra_usage"]?.attributedTitle = tabbedMenuItemString("\(label): \(spendText)", "")
+            if let util = extra.utilization {
+                recordUsageSample("extra_usage", utilization: util)
+                updateRateItem(key: "extra_usage", utilization: util, isWeekly: true)
+            } else {
+                rateItems["extra_usage"]?.isHidden = true
+            }
         } else {
+            lastSpentCredits = nil
             usageItems["extra_usage"]?.title = "Extra: --"
             usageItems["extra_usage"]?.attributedTitle = nil
             rateItems["extra_usage"]?.isHidden = true

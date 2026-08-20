@@ -54,6 +54,7 @@ struct ExtraUsage: Codable {
     let monthly_limit: Double?
     let used_credits: Double?
     let utilization: Double?
+    let decimal_places: Int?
 }
 
 struct APIErrorResponse: Codable {

@@ -180,11 +180,28 @@ enum StatusDisplayModeSelector {
 // MARK: - Extra Usage Row Visibility
 
 enum ExtraUsageRowVisibility {
-    /// The Extra row is noise while the scoped weekly limit still has room, so by
-    /// default it appears only once that limit is spent and starts billing credits.
-    static func shouldShow(alwaysShow: Bool, scopedWeeklyUtilization: Double?) -> Bool {
+    /// Credits can start accruing while every percentage is still under 100, so spend
+    /// itself is the signal — the scoped weekly limit only gates the $0 case.
+    static func shouldShow(
+        alwaysShow: Bool,
+        spentCredits: Double?,
+        scopedWeeklyUtilization: Double?
+    ) -> Bool {
         if alwaysShow { return true }
+        if let spentCredits, spentCredits > 0 { return true }
         guard let scopedWeeklyUtilization else { return false }
         return scopedWeeklyUtilization >= 100
+    }
+}
+
+// MARK: - Extra Usage Credits
+
+enum ExtraUsageFormatter {
+    /// `used_credits` is a minor-unit integer, scaled by the `decimal_places` the API
+    /// reports alongside it — 73333 at 2 places is $733.33.
+    static func formatCredits(_ usedCredits: Double, decimalPlaces: Int?) -> String {
+        let places = max(decimalPlaces ?? 2, 0)
+        let divisor = pow(10.0, Double(places))
+        return String(format: "$%.\(places)f", usedCredits / divisor)
     }
 }

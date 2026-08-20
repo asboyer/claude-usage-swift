@@ -166,7 +166,7 @@ Hitting a per-model weekly limit (Fable, Opus, ...) starts billing extra usage w
 every percentage is still under 100, so a percentage alone can hide the fact that
 you are paying. Claude's menu bar text follows whichever of the two moved last:
 
-- When extra usage credits increase, the menu bar switches to the amount spent, e.g. `$4.20`
+- When extra usage credits increase, the menu bar switches to the amount spent, e.g. `$733.33`
 - When the 5-hour percentage increases and credits held flat, it switches back to the percentage
 - If both increased since the last refresh, the dollar amount wins
 - At 100% of the 5-hour limit the dollar amount is shown whenever extra usage is enabled, otherwise the reset time
@@ -179,7 +179,7 @@ All settings are accessible from the **Settings** submenu:
 - **Usage Source** — how to fetch usage:
   - **Use Desktop Cookies (recommended)** — Claude Desktop web session; avoids OAuth usage API rate limits; falls back to OAuth if cookies aren't available
   - **Use OAuth API** — only `api.anthropic.com/api/oauth/usage` (may hit 429 when rate limited)
-- **Always Show Extra Usage** — keep the **Extra** row visible at all times. Off by default, so the row appears only once the per-model weekly limit hits 100% and starts billing credits.
+- **Always Show Extra Usage** — keep the **Extra** row visible even at $0 spent. Off by default, so the row appears once credits have actually accrued (or the per-model weekly limit hits 100%).
 - **Colors** — toggle projection-based color coding:
   - **Green** (projected ≤80%) — on pace to finish well under 100%
   - **Yellow** (projected 80–105%) — might reach 100%
