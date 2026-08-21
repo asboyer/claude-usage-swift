@@ -907,12 +907,12 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         updateUsageItem(key: scopedWeeklyKey, limit: scoped?.limit, windowSeconds: 7 * 86400)
     }
 
-    /// Hides the Extra row until credits are actually accruing, unless pinned open by the setting.
+    /// Hides the Extra row until a weekly limit is exhausted, unless pinned open by the setting.
     func applyExtraUsageRowVisibility() {
         let shouldShow = ExtraUsageRowVisibility.shouldShow(
             alwaysShow: alwaysShowExtraUsageEnabled,
-            spentCredits: lastSpentCredits,
-            scopedWeeklyUtilization: lastScopedWeeklyUtilization
+            scopedWeeklyUtilization: lastScopedWeeklyUtilization,
+            overallWeeklyUtilization: lastOverallWeeklyUtilization
         )
         usageItems["extra_usage"]?.isHidden = !shouldShow
         if !shouldShow {
@@ -938,6 +938,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
 
         lastFetchDate = Date()
         updateUsageItem(key: "five_hour", limit: usage.five_hour, windowSeconds: 5 * 3600)
+        lastOverallWeeklyUtilization = usage.seven_day?.utilization
         updateUsageItem(key: "seven_day", limit: usage.seven_day, windowSeconds: 7 * 86400)
         updateScopedWeeklyItem(scopedWeeklyLimit(usage))
         updateUsageItem(key: "seven_day_opus", limit: usage.seven_day_opus, windowSeconds: 7 * 86400)
@@ -948,7 +949,6 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         // `monthly_limit` and `utilization` are null on plans that only meter spend, so the
         // row needs `used_credits` alone.
         if let extra = usage.extra_usage, extra.is_enabled, let used = extra.used_credits {
-            lastSpentCredits = used
             let label = categoryLabel(for: "extra_usage")
             let spendText = ExtraUsageFormatter.formatCredits(used, decimalPlaces: extra.decimal_places)
             usageItems["extra_usage"]?.title = "\(label): \(spendText)"
@@ -960,7 +960,6 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
                 rateItems["extra_usage"]?.isHidden = true
             }
         } else {
-            lastSpentCredits = nil
             usageItems["extra_usage"]?.title = "Extra: --"
             usageItems["extra_usage"]?.attributedTitle = nil
             rateItems["extra_usage"]?.isHidden = true

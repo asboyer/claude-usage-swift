@@ -173,7 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var previousExtraUtil: Double = -1
     var previousSpentCredits: Double?
     var lastScopedWeeklyUtilization: Double?
-    var lastSpentCredits: Double?
+    var lastOverallWeeklyUtilization: Double?
     var statusDisplayMode: StatusDisplayMode = .percentage
     var lastKnownResetDate: Date?
     var lastSessionFinalUtil: Double = 0
