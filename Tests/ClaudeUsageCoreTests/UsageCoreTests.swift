@@ -236,36 +236,43 @@ final class UsageCoreTests: XCTestCase {
 
     private func shouldShowRow(
         alwaysShow: Bool = false,
-        spent: Double?,
-        scopedWeekly: Double?
+        scopedWeekly: Double?,
+        overallWeekly: Double?
     ) -> Bool {
         return ExtraUsageRowVisibility.shouldShow(
             alwaysShow: alwaysShow,
-            spentCredits: spent,
-            scopedWeeklyUtilization: scopedWeekly
+            scopedWeeklyUtilization: scopedWeekly,
+            overallWeeklyUtilization: overallWeekly
         )
     }
 
-    func testExtraRowShownWhenCreditsAccrueBelowFullScopedWeekly() {
-        XCTAssertTrue(shouldShowRow(spent: 73333, scopedWeekly: 70))
+    func testExtraRowHiddenWhileBothWeeklyLimitsHaveRoom() {
+        XCTAssertFalse(shouldShowRow(scopedWeekly: 70, overallWeekly: 45))
     }
 
-    func testExtraRowHiddenWithNoSpendAndScopedWeeklyRoom() {
-        XCTAssertFalse(shouldShowRow(spent: 0, scopedWeekly: 70))
+    func testExtraRowShownWhenScopedWeeklyIsExhausted() {
+        XCTAssertTrue(shouldShowRow(scopedWeekly: 100, overallWeekly: 45))
     }
 
-    func testExtraRowShownAtFullScopedWeeklyBeforeAnySpend() {
-        XCTAssertTrue(shouldShowRow(spent: 0, scopedWeekly: 100))
+    func testExtraRowShownWhenOverallWeeklyIsExhausted() {
+        XCTAssertTrue(shouldShowRow(scopedWeekly: 70, overallWeekly: 100))
     }
 
-    func testExtraRowHiddenWhenExtraUsageUnavailable() {
-        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: 70))
-        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: nil))
+    func testExtraRowStaysHiddenJustUnderEitherLimit() {
+        XCTAssertFalse(shouldShowRow(scopedWeekly: 99.9, overallWeekly: 99.9))
+    }
+
+    func testExtraRowHiddenWithoutUtilizationData() {
+        XCTAssertFalse(shouldShowRow(scopedWeekly: nil, overallWeekly: nil))
+    }
+
+    func testExtraRowShownOnOverallWeeklyWithoutScopedData() {
+        XCTAssertTrue(shouldShowRow(scopedWeekly: nil, overallWeekly: 100))
     }
 
     func testAlwaysShowOverridesEverything() {
-        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: 0, scopedWeekly: 0))
-        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: nil, scopedWeekly: nil))
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, scopedWeekly: 0, overallWeekly: 0))
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, scopedWeekly: nil, overallWeekly: nil))
     }
 
     // MARK: - Extra Usage Credits
