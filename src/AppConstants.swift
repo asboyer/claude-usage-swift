@@ -6,9 +6,11 @@ let appAuthor = "asboyer"
 let scopedWeeklyKey = "weekly_scoped"
 
 // Claude usage categories.
+// `extra_usage` sits right after the scoped weekly row because that limit is what
+// starts billing it.
 let claudeCategoryKeys: [String] = [
-    "five_hour", "seven_day", scopedWeeklyKey, "seven_day_opus", "seven_day_sonnet",
-    "seven_day_oauth_apps", "seven_day_cowork", "extra_usage",
+    "five_hour", "seven_day", scopedWeeklyKey, "extra_usage", "seven_day_opus",
+    "seven_day_sonnet", "seven_day_oauth_apps", "seven_day_cowork",
 ]
 
 // Codex usage categories. Codex only exposes a weekly limit window.

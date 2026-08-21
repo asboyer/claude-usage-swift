@@ -177,4 +177,109 @@ final class UsageCoreTests: XCTestCase {
         XCTAssertEqual(rate.perHour ?? 0, 20, accuracy: 0.1)
         XCTAssertEqual(rate.descriptor, "steady")
     }
+
+    // MARK: - Status Bar Display Mode
+
+    private func selectMode(
+        previous: StatusDisplayMode = .percentage,
+        util: Double,
+        priorUtil: Double?,
+        spent: Double?,
+        priorSpent: Double?
+    ) -> StatusDisplayMode {
+        return StatusDisplayModeSelector.select(
+            previous: previous,
+            fiveHourUtilization: util,
+            previousFiveHourUtilization: priorUtil,
+            spentCredits: spent,
+            previousSpentCredits: priorSpent
+        )
+    }
+
+    func testRisingOverageTakesOverBelowFullUtilization() {
+        let mode = selectMode(util: 70, priorUtil: 70, spent: 250, priorSpent: 100)
+        XCTAssertEqual(mode, .overage)
+    }
+
+    func testRisingOverageWinsWhenUtilizationAlsoRises() {
+        let mode = selectMode(util: 72, priorUtil: 70, spent: 250, priorSpent: 100)
+        XCTAssertEqual(mode, .overage)
+    }
+
+    func testRisingUtilizationReclaimsMenuBarFromOverage() {
+        let mode = selectMode(previous: .overage, util: 42, priorUtil: 40, spent: 250, priorSpent: 250)
+        XCTAssertEqual(mode, .percentage)
+    }
+
+    func testFlatUsageKeepsCurrentMode() {
+        XCTAssertEqual(
+            selectMode(previous: .overage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
+            .overage
+        )
+        XCTAssertEqual(
+            selectMode(previous: .percentage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
+            .percentage
+        )
+    }
+
+    func testMissingSpendFallsBackToPercentage() {
+        let mode = selectMode(previous: .overage, util: 40, priorUtil: 40, spent: nil, priorSpent: 250)
+        XCTAssertEqual(mode, .percentage)
+    }
+
+    func testFirstFetchShowsPercentage() {
+        let mode = selectMode(util: 40, priorUtil: nil, spent: 250, priorSpent: nil)
+        XCTAssertEqual(mode, .percentage)
+    }
+
+    // MARK: - Extra Usage Row Visibility
+
+    private func shouldShowRow(
+        alwaysShow: Bool = false,
+        spent: Double?,
+        scopedWeekly: Double?
+    ) -> Bool {
+        return ExtraUsageRowVisibility.shouldShow(
+            alwaysShow: alwaysShow,
+            spentCredits: spent,
+            scopedWeeklyUtilization: scopedWeekly
+        )
+    }
+
+    func testExtraRowShownWhenCreditsAccrueBelowFullScopedWeekly() {
+        XCTAssertTrue(shouldShowRow(spent: 73333, scopedWeekly: 70))
+    }
+
+    func testExtraRowHiddenWithNoSpendAndScopedWeeklyRoom() {
+        XCTAssertFalse(shouldShowRow(spent: 0, scopedWeekly: 70))
+    }
+
+    func testExtraRowShownAtFullScopedWeeklyBeforeAnySpend() {
+        XCTAssertTrue(shouldShowRow(spent: 0, scopedWeekly: 100))
+    }
+
+    func testExtraRowHiddenWhenExtraUsageUnavailable() {
+        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: 70))
+        XCTAssertFalse(shouldShowRow(spent: nil, scopedWeekly: nil))
+    }
+
+    func testAlwaysShowOverridesEverything() {
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: 0, scopedWeekly: 0))
+        XCTAssertTrue(shouldShowRow(alwaysShow: true, spent: nil, scopedWeekly: nil))
+    }
+
+    // MARK: - Extra Usage Credits
+
+    func testFormatCreditsUsesReportedDecimalPlaces() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: 2), "$733.33")
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(500, decimalPlaces: 0), "$500")
+    }
+
+    func testFormatCreditsDefaultsToTwoDecimalPlaces() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: nil), "$733.33")
+    }
+
+    func testFormatCreditsHandlesZero() {
+        XCTAssertEqual(ExtraUsageFormatter.formatCredits(0, decimalPlaces: 2), "$0.00")
+    }
 }

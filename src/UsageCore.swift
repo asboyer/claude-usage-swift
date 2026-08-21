@@ -148,3 +148,60 @@ enum UsageRateCalculator {
         return "extreme"
     }
 }
+
+// MARK: - Status Bar Display Mode
+
+/// What the menu bar shows: the five-hour percentage, or the overage dollars.
+enum StatusDisplayMode: String, Equatable {
+    case percentage
+    case overage
+}
+
+enum StatusDisplayModeSelector {
+    /// Overage takes over the menu bar as soon as paid credits tick up — a scoped
+    /// weekly limit can start billing while every percentage is still under 100 —
+    /// and hands it back once the five-hour percentage moves again.
+    static func select(
+        previous: StatusDisplayMode,
+        fiveHourUtilization: Double,
+        previousFiveHourUtilization: Double?,
+        spentCredits: Double?,
+        previousSpentCredits: Double?
+    ) -> StatusDisplayMode {
+        guard let spentCredits else { return .percentage }
+        if let previousSpentCredits, spentCredits > previousSpentCredits { return .overage }
+        if let previousFiveHourUtilization, fiveHourUtilization > previousFiveHourUtilization {
+            return .percentage
+        }
+        return previous
+    }
+}
+
+// MARK: - Extra Usage Row Visibility
+
+enum ExtraUsageRowVisibility {
+    /// Credits can start accruing while every percentage is still under 100, so spend
+    /// itself is the signal — the scoped weekly limit only gates the $0 case.
+    static func shouldShow(
+        alwaysShow: Bool,
+        spentCredits: Double?,
+        scopedWeeklyUtilization: Double?
+    ) -> Bool {
+        if alwaysShow { return true }
+        if let spentCredits, spentCredits > 0 { return true }
+        guard let scopedWeeklyUtilization else { return false }
+        return scopedWeeklyUtilization >= 100
+    }
+}
+
+// MARK: - Extra Usage Credits
+
+enum ExtraUsageFormatter {
+    /// `used_credits` is a minor-unit integer, scaled by the `decimal_places` the API
+    /// reports alongside it — 73333 at 2 places is $733.33.
+    static func formatCredits(_ usedCredits: Double, decimalPlaces: Int?) -> String {
+        let places = max(decimalPlaces ?? 2, 0)
+        let divisor = pow(10.0, Double(places))
+        return String(format: "$%.\(places)f", usedCredits / divisor)
+    }
+}
