@@ -101,7 +101,9 @@ private func getClaudeCookie(name: String, key: Data) -> String? {
         .appendingPathComponent("Cookies")
 
     var db: OpaquePointer?
-    guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else { return nil }
+    guard
+        sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
+    else { return nil }
     defer { sqlite3_close(db) }
 
     let query = "SELECT encrypted_value FROM cookies WHERE host_key = '.claude.ai' AND name = '\(name)' LIMIT 1;"
