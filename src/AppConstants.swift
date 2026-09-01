@@ -16,8 +16,11 @@ let claudeCategoryKeys: [String] = [
 // Codex usage categories, ordered like Claude's: session window first, then weekly.
 let codexCategoryKeys: [String] = ["codex_five_hour", "codex_weekly"]
 
+// Cursor usage categories: the two included-usage buckets, both on the monthly billing cycle.
+let cursorCategoryKeys: [String] = ["cursor_models", "cursor_other_models"]
+
 // All trackable usage categories.
-let allCategoryKeys: [String] = claudeCategoryKeys + codexCategoryKeys
+let allCategoryKeys: [String] = claudeCategoryKeys + codexCategoryKeys + cursorCategoryKeys
 
 let categoryLabels: [String: String] = [
     "five_hour": "5-hour",
@@ -30,6 +33,8 @@ let categoryLabels: [String: String] = [
     "extra_usage": "Extra",
     "codex_five_hour": "5-hour",
     "codex_weekly": "Weekly",
+    "cursor_models": "Cursor Models",
+    "cursor_other_models": "Other Models",
 ]
 
 /// Labels the API supplies at runtime, overriding `categoryLabels`.
@@ -42,8 +47,10 @@ func categoryLabel(for key: String) -> String {
 let providerSectionTitles: [UsageProvider: String] = [
     .claude: "Claude",
     .codex: "Codex",
+    .cursor: "Cursor",
 ]
 
 let defaultPinnedKeys: Set<String> = [
     "five_hour", "seven_day", scopedWeeklyKey, "extra_usage", "codex_five_hour", "codex_weekly",
+    "cursor_models", "cursor_other_models",
 ]

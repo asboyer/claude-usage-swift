@@ -58,82 +58,92 @@ final class CodexUsageCoreTests: XCTestCase {
     // MARK: - Menu Bar Ownership
 
     func testOwnershipMovesToCodexWhenCodexIncreases() {
-        let current = MenuBarOwnership(provider: .claude, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+        let current = MenuBarOwnership(provider: .claude, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 40,
-            codexUtilization: 14
+            utilizations: [.claude: 40, .codex: 14]
         )
 
         XCTAssertEqual(updated.provider, .codex)
-        XCTAssertEqual(updated.lastCodexUtilization, 14)
-        XCTAssertEqual(updated.lastClaudeUtilization, 40)
+        XCTAssertEqual(updated.lastUtilizations[.codex], 14)
+        XCTAssertEqual(updated.lastUtilizations[.claude], 40)
     }
 
     func testOwnershipMovesToClaudeWhenClaudeIncreases() {
-        let current = MenuBarOwnership(provider: .codex, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+        let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 46,
-            codexUtilization: 10
+            utilizations: [.claude: 46, .codex: 10]
         )
 
         XCTAssertEqual(updated.provider, .claude)
     }
 
-    func testOwnershipPrefersLargerIncreaseWhenBothMoved() {
-        let current = MenuBarOwnership(provider: .claude, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+    func testOwnershipMovesToCursorWhenCursorIncreases() {
+        let current = MenuBarOwnership(
+            provider: .claude,
+            lastUtilizations: [.claude: 40, .codex: 10, .cursor: 2]
+        )
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 41,
-            codexUtilization: 18
+            utilizations: [.claude: 40, .codex: 10, .cursor: 6]
+        )
+
+        XCTAssertEqual(updated.provider, .cursor)
+        XCTAssertEqual(updated.lastUtilizations[.cursor], 6)
+    }
+
+    func testOwnershipPrefersLargerIncreaseWhenAllMoved() {
+        let current = MenuBarOwnership(
+            provider: .claude,
+            lastUtilizations: [.claude: 40, .codex: 10, .cursor: 2]
+        )
+        let updated = MenuBarOwnershipResolver.resolve(
+            current: current,
+            utilizations: [.claude: 41, .codex: 18, .cursor: 3]
         )
 
         XCTAssertEqual(updated.provider, .codex)
     }
 
     func testOwnershipIsUnchangedWhenNeitherIncreases() {
-        let current = MenuBarOwnership(provider: .codex, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+        let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 40,
-            codexUtilization: 10
+            utilizations: [.claude: 40, .codex: 10]
         )
 
         XCTAssertEqual(updated.provider, .codex)
     }
 
     func testLimitResetDoesNotTransferOwnership() {
-        let current = MenuBarOwnership(provider: .codex, lastClaudeUtilization: 40, lastCodexUtilization: 90)
+        let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 90])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 5,
-            codexUtilization: 0
+            utilizations: [.claude: 5, .codex: 0]
         )
 
         XCTAssertEqual(updated.provider, .codex)
-        XCTAssertEqual(updated.lastClaudeUtilization, 5)
-        XCTAssertEqual(updated.lastCodexUtilization, 0)
+        XCTAssertEqual(updated.lastUtilizations[.claude], 5)
+        XCTAssertEqual(updated.lastUtilizations[.codex], 0)
     }
 
     func testOwnershipFallsToTheOnlyProviderWithData() {
-        let current = MenuBarOwnership(provider: .codex, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+        let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: 40,
-            codexUtilization: nil
+            utilizations: [.claude: 40, .codex: nil]
         )
 
         XCTAssertEqual(updated.provider, .claude)
-        XCTAssertEqual(updated.lastCodexUtilization, 10)
+        XCTAssertEqual(updated.lastUtilizations[.codex], 10)
     }
 
     func testOwnershipIsUnchangedWhenNoProviderHasData() {
-        let current = MenuBarOwnership(provider: .codex, lastClaudeUtilization: 40, lastCodexUtilization: 10)
+        let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
-            claudeUtilization: nil,
-            codexUtilization: nil
+            utilizations: [.claude: nil, .codex: nil, .cursor: nil]
         )
 
         XCTAssertEqual(updated, current)
@@ -142,12 +152,12 @@ final class CodexUsageCoreTests: XCTestCase {
     func testFirstReadingKeepsDefaultOwnerAndStoresBaselines() {
         let updated = MenuBarOwnershipResolver.resolve(
             current: .claudeDefault,
-            claudeUtilization: 40,
-            codexUtilization: 10
+            utilizations: [.claude: 40, .codex: 10, .cursor: 4]
         )
 
         XCTAssertEqual(updated.provider, .claude)
-        XCTAssertEqual(updated.lastClaudeUtilization, 40)
-        XCTAssertEqual(updated.lastCodexUtilization, 10)
+        XCTAssertEqual(updated.lastUtilizations[.claude], 40)
+        XCTAssertEqual(updated.lastUtilizations[.codex], 10)
+        XCTAssertEqual(updated.lastUtilizations[.cursor], 4)
     }
 }

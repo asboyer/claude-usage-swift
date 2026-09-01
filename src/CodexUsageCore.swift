@@ -40,21 +40,18 @@ enum CodexWindowSelector {
 // MARK: - Menu Bar Ownership
 
 /// Which provider's percentage the status item currently displays.
-enum UsageProvider: String, Codable {
+/// Declaration order breaks ties between providers that moved by the same amount.
+enum UsageProvider: String, Codable, CaseIterable {
     case claude
     case codex
+    case cursor
 }
 
 struct MenuBarOwnership: Equatable {
     var provider: UsageProvider
-    var lastClaudeUtilization: Double?
-    var lastCodexUtilization: Double?
+    var lastUtilizations: [UsageProvider: Double]
 
-    static let claudeDefault = MenuBarOwnership(
-        provider: .claude,
-        lastClaudeUtilization: nil,
-        lastCodexUtilization: nil
-    )
+    static let claudeDefault = MenuBarOwnership(provider: .claude, lastUtilizations: [:])
 }
 
 enum MenuBarOwnershipResolver {
@@ -62,46 +59,35 @@ enum MenuBarOwnershipResolver {
     /// Utilization drops mean a limit window reset, so they never transfer ownership.
     static func resolve(
         current: MenuBarOwnership,
-        claudeUtilization: Double?,
-        codexUtilization: Double?
+        utilizations: [UsageProvider: Double?]
     ) -> MenuBarOwnership {
         var updated = current
-        let claudeIncrease = increase(from: current.lastClaudeUtilization, to: claudeUtilization)
-        let codexIncrease = increase(from: current.lastCodexUtilization, to: codexUtilization)
+        let reported = utilizations.compactMapValues { $0 }
+        guard !reported.isEmpty else { return updated }
 
-        if let claudeUtilization {
-            updated.lastClaudeUtilization = claudeUtilization
+        var increases: [UsageProvider: Double] = [:]
+        for (provider, utilization) in reported {
+            if let previous = current.lastUtilizations[provider], utilization > previous {
+                increases[provider] = utilization - previous
+            }
+            updated.lastUtilizations[provider] = utilization
         }
-        if let codexUtilization {
-            updated.lastCodexUtilization = codexUtilization
+
+        if let claimant = providerWithLargestIncrease(increases) {
+            updated.provider = claimant
+            return updated
         }
 
         // A provider without data cannot own the status item.
-        if claudeUtilization == nil, codexUtilization != nil {
-            updated.provider = .codex
-            return updated
+        if reported[updated.provider] == nil {
+            updated.provider = UsageProvider.allCases.first { reported[$0] != nil } ?? updated.provider
         }
-        if codexUtilization == nil, claudeUtilization != nil {
-            updated.provider = .claude
-            return updated
-        }
-
-        switch (claudeIncrease, codexIncrease) {
-        case (let claudeDelta?, let codexDelta?):
-            updated.provider = codexDelta > claudeDelta ? .codex : .claude
-        case (_?, nil):
-            updated.provider = .claude
-        case (nil, _?):
-            updated.provider = .codex
-        case (nil, nil):
-            break
-        }
-
         return updated
     }
 
-    private static func increase(from previous: Double?, to current: Double?) -> Double? {
-        guard let previous, let current, current > previous else { return nil }
-        return current - previous
+    private static func providerWithLargestIncrease(_ increases: [UsageProvider: Double]) -> UsageProvider? {
+        return UsageProvider.allCases
+            .filter { increases[$0] != nil }
+            .max { (increases[$0] ?? 0) < (increases[$1] ?? 0) }
     }
 }

@@ -114,12 +114,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var codexTrackingItem: NSMenuItem!
 
+    // Cursor usage tracking
+    var cursorTrackingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(cursorTrackingEnabled, forKey: "cursorTrackingEnabled")
+            cursorTrackingItem?.state = cursorTrackingEnabled ? .on : .off
+        }
+    }
+    var cursorTrackingItem: NSMenuItem!
+
     // Whether the last Codex fetch produced usage data.
     var codexAvailable = false
+
+    // Whether the last Cursor fetch produced usage data.
+    var cursorAvailable = false
 
     // Status item text per provider, plus which provider currently owns the status item.
     var claudeStatusText: String?
     var codexStatusText: String?
+    var cursorStatusText: String?
     var menuBarOwnership: MenuBarOwnership = .claudeDefault
 
     // Current interval in seconds
@@ -225,6 +238,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ud.object(forKey: "codexTrackingEnabled") != nil {
             codexTrackingEnabled = ud.bool(forKey: "codexTrackingEnabled")
         }
+        if ud.object(forKey: "cursorTrackingEnabled") != nil {
+            cursorTrackingEnabled = ud.bool(forKey: "cursorTrackingEnabled")
+        }
         menuBarOwnership = loadMenuBarOwnership()
 
         if let saved = ud.object(forKey: "pinnedKeys") as? [String] {
@@ -239,6 +255,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 restored.insert("codex_five_hour")
                 ud.set(true, forKey: "codexFiveHourPinMigrated")
             }
+            // Existing installs predate the Cursor category, so pin it once on upgrade.
+            if !ud.bool(forKey: "cursorPinMigrated") {
+                restored.formUnion(cursorCategoryKeys)
+                ud.set(true, forKey: "cursorPinMigrated")
+            }
             // The API replaced the per-model weekly fields with a single scoped limit.
             if !ud.bool(forKey: "scopedWeeklyPinMigrated") {
                 restored.insert(scopedWeeklyKey)
@@ -249,6 +270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             ud.set(true, forKey: "codexPinMigrated")
             ud.set(true, forKey: "codexFiveHourPinMigrated")
+            ud.set(true, forKey: "cursorPinMigrated")
             ud.set(true, forKey: "scopedWeeklyPinMigrated")
         }
 
