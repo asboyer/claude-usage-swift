@@ -45,6 +45,7 @@ enum UsageProvider: String, Codable, CaseIterable {
     case claude
     case codex
     case cursor
+    case opencode
 }
 
 struct MenuBarOwnership: Equatable {

@@ -48,6 +48,7 @@ let providerSectionTitles: [UsageProvider: String] = [
     .claude: "Claude",
     .codex: "Codex",
     .cursor: "Cursor",
+    .opencode: "Opencode",
 ]
 
 let defaultPinnedKeys: Set<String> = [

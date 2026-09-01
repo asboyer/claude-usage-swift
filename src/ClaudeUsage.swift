@@ -123,16 +123,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var cursorTrackingItem: NSMenuItem!
 
+    // Opencode usage tracking
+    var opencodeTrackingEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(opencodeTrackingEnabled, forKey: "opencodeTrackingEnabled")
+            opencodeTrackingItem?.state = opencodeTrackingEnabled ? .on : .off
+        }
+    }
+    var opencodeTrackingItem: NSMenuItem!
+
     // Whether the last Codex fetch produced usage data.
     var codexAvailable = false
 
     // Whether the last Cursor fetch produced usage data.
     var cursorAvailable = false
 
+    // Month-to-date opencode spend, and whether the section lists every model or just the top few.
+    var opencodeUsage: OpencodeUsage?
+    var opencodeExpanded = false
+
     // Status item text per provider, plus which provider currently owns the status item.
     var claudeStatusText: String?
     var codexStatusText: String?
     var cursorStatusText: String?
+    var opencodeStatusText: String?
     var menuBarOwnership: MenuBarOwnership = .claudeDefault
 
     // Current interval in seconds
@@ -240,6 +254,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if ud.object(forKey: "cursorTrackingEnabled") != nil {
             cursorTrackingEnabled = ud.bool(forKey: "cursorTrackingEnabled")
+        }
+        if ud.object(forKey: "opencodeTrackingEnabled") != nil {
+            opencodeTrackingEnabled = ud.bool(forKey: "opencodeTrackingEnabled")
         }
         menuBarOwnership = loadMenuBarOwnership()
 

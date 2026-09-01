@@ -8,13 +8,16 @@ extension AppDelegate {
         menu.removeAllItems()
 
         // Pinned usage items with rate sub-items, grouped by provider
-        let showsProviderSections = codexSectionVisible || cursorSectionVisible
+        let showsProviderSections = codexSectionVisible || cursorSectionVisible || opencodeSectionVisible
         addUsageSection(provider: .claude, keys: claudeCategoryKeys, showsHeader: showsProviderSections)
         if codexSectionVisible {
             addUsageSection(provider: .codex, keys: codexCategoryKeys, showsHeader: true)
         }
         if cursorSectionVisible {
             addUsageSection(provider: .cursor, keys: cursorCategoryKeys, showsHeader: true)
+        }
+        if opencodeSectionVisible {
+            addOpencodeSection()
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -116,6 +119,15 @@ extension AppDelegate {
         cursorTrackingItem.target = self
         cursorTrackingItem.state = cursorTrackingEnabled ? .on : .off
         settingsMenu.addItem(cursorTrackingItem)
+
+        opencodeTrackingItem = NSMenuItem(
+            title: "Track Opencode",
+            action: #selector(toggleOpencodeTracking),
+            keyEquivalent: ""
+        )
+        opencodeTrackingItem.target = self
+        opencodeTrackingItem.state = opencodeTrackingEnabled ? .on : .off
+        settingsMenu.addItem(opencodeTrackingItem)
 
         // Keyboard Shortcut submenu
         let hotkeyMenu = NSMenu()
@@ -318,6 +330,57 @@ extension AppDelegate {
     /// Cursor rows only appear once a fetch has produced usage data.
     var cursorSectionVisible: Bool {
         return cursorTrackingEnabled && cursorAvailable
+    }
+
+    /// Opencode rows only appear once a read has found models that actually cost money.
+    var opencodeSectionVisible: Bool {
+        return opencodeTrackingEnabled && !(opencodeUsage?.models.isEmpty ?? true)
+    }
+
+    /// Lists month-to-date spend per model, collapsed to the priciest few until "More" is clicked.
+    /// Unlike the other providers these rows are discovered at runtime, so they are built fresh
+    /// on every rebuild rather than kept in `usageItems`.
+    func addOpencodeSection() {
+        guard let usage = opencodeUsage else { return }
+
+        if menu.numberOfItems > 0 {
+            menu.addItem(NSMenuItem.separator())
+        }
+        menu.addItem(providerHeaderItem(.opencode))
+
+        let collapsedCount = OpencodeUsageCore.collapsedModelCount
+        let hasHiddenModels = usage.models.count > collapsedCount
+        let shown = opencodeExpanded ? usage.models : Array(usage.models.prefix(collapsedCount))
+
+        for model in shown {
+            let cost = OpencodeUsageCore.formatCost(model.costUSD)
+            // `noop` keeps these rows looking like the other providers' usage rows,
+            // which are actionless but not greyed out.
+            let item = NSMenuItem(
+                title: "\(model.displayName): \(cost)", action: #selector(noop), keyEquivalent: "")
+            item.target = self
+            item.attributedTitle = tabbedMenuItemString(model.displayName, cost)
+            menu.addItem(item)
+        }
+
+        guard hasHiddenModels else { return }
+        let toggle = NSMenuItem(
+            title: opencodeExpanded ? "Less" : "More",
+            action: #selector(toggleOpencodeExpanded),
+            keyEquivalent: ""
+        )
+        toggle.target = self
+        menu.addItem(toggle)
+    }
+
+    /// Clicking a menu item always dismisses the menu, so the expanded list is reopened
+    /// immediately — otherwise the click would look like it did nothing.
+    @objc func toggleOpencodeExpanded() {
+        opencodeExpanded.toggle()
+        rebuildMenu()
+        DispatchQueue.main.async { [weak self] in
+            self?.showMenu()
+        }
     }
 
     func providerHeaderItem(_ provider: UsageProvider) -> NSMenuItem {
@@ -595,6 +658,23 @@ extension AppDelegate {
         refresh()
     }
 
+    @objc func toggleOpencodeTracking() {
+        opencodeTrackingEnabled = !opencodeTrackingEnabled
+        guard opencodeTrackingEnabled else {
+            opencodeUsage = nil
+            opencodeStatusText = nil
+            opencodeExpanded = false
+            if menuBarOwnership.provider == .opencode {
+                menuBarOwnership.provider = .claude
+            }
+            saveMenuBarOwnership()
+            updateStatusItemTitle()
+            rebuildMenu()
+            return
+        }
+        refresh()
+    }
+
     @objc func toggleCursorTracking() {
         cursorTrackingEnabled = !cursorTrackingEnabled
         guard cursorTrackingEnabled else {
@@ -681,7 +761,7 @@ extension AppDelegate {
     }
 
     @objc func copyUsage() {
-        let showsHeaders = codexSectionVisible || cursorSectionVisible
+        let showsHeaders = codexSectionVisible || cursorSectionVisible || opencodeSectionVisible
         let sections: [(provider: UsageProvider, keys: [String])] = [
             (.claude, claudeCategoryKeys),
             (.codex, codexSectionVisible ? codexCategoryKeys : []),
@@ -696,6 +776,15 @@ extension AppDelegate {
                 lines.append(providerSectionTitles[provider] ?? "")
             }
             lines.append(contentsOf: keys.compactMap { usageItems[$0] }.filter { !$0.isHidden }.map { $0.title })
+        }
+
+        // Copy every model, not just the collapsed few — the clipboard has no "More" to click.
+        if let usage = opencodeUsage, opencodeSectionVisible {
+            lines.append(providerSectionTitles[.opencode] ?? "")
+            lines.append(
+                contentsOf: usage.models.map {
+                    "\($0.displayName): \(OpencodeUsageCore.formatCost($0.costUSD))"
+                })
         }
 
         let text = (lines + [updatedItem.title]).joined(separator: "\n")
@@ -785,6 +874,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         var claudeRateLimited = false
         var codexUsage: CodexUsage?
         var cursorUsage: CursorUsage?
+        var opencodeUsageResult: OpencodeUsage?
 
         group.enter()
         fetchClaudeUsage { usage, rateLimited in
@@ -819,15 +909,29 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             }
         }
 
+        if opencodeTrackingEnabled {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                fetchOpencodeUsage { usage in
+                    DispatchQueue.main.async {
+                        opencodeUsageResult = usage
+                        group.leave()
+                    }
+                }
+            }
+        }
+
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.updateUI(usage: claudeUsage, rateLimited: claudeRateLimited)
             self.updateCodexUI(codexUsage)
             self.updateCursorUI(cursorUsage)
+            self.updateOpencodeUI(opencodeUsageResult)
             self.updateMenuBarOwnership(
                 claudeUsage: claudeUsage,
                 codexUsage: codexUsage,
-                cursorUsage: cursorUsage
+                cursorUsage: cursorUsage,
+                opencodeUsage: opencodeUsageResult
             )
             self.updateStatusItemTitle()
         }
@@ -1220,13 +1324,37 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         updateUsageItem(key: key, limit: limit, windowSeconds: usage.cycleSeconds)
     }
 
+    // MARK: - Opencode
+
+    func updateOpencodeUI(_ usage: OpencodeUsage?) {
+        let previous = opencodeUsage
+
+        if opencodeTrackingEnabled, let usage, !usage.models.isEmpty {
+            opencodeUsage = usage
+            opencodeStatusText = OpencodeUsageCore.formatCost(usage.totalUSD)
+        } else {
+            opencodeUsage = nil
+            opencodeStatusText = nil
+        }
+
+        // These rows are built from the fetched models rather than kept in `usageItems`,
+        // so any change to what they'd say means rebuilding the menu.
+        if menuReady && previous != opencodeUsage {
+            rebuildMenu()
+        }
+    }
+
     // MARK: - Status Item
 
     func updateMenuBarOwnership(
         claudeUsage: UsageResponse?,
         codexUsage: CodexUsage?,
-        cursorUsage: CursorUsage?
+        cursorUsage: CursorUsage?,
+        opencodeUsage: OpencodeUsage?
     ) {
+        // Opencode reports dollars where the others report percentages. Both only ever climb
+        // within a billing window, which is all the resolver compares, so the mixed units cost
+        // nothing but tie-breaking precision between a big dollar jump and a big percent jump.
         menuBarOwnership = MenuBarOwnershipResolver.resolve(
             current: menuBarOwnership,
             utilizations: [
@@ -1235,6 +1363,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
                     ? (codexUsage?.fiveHour ?? codexUsage?.weekly)?.usedPercent
                     : nil,
                 .cursor: cursorTrackingEnabled ? cursorUsage?.highestPercent : nil,
+                .opencode: opencodeTrackingEnabled ? opencodeUsage?.totalUSD : nil,
             ]
         )
         saveMenuBarOwnership()
@@ -1245,6 +1374,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             .claude: claudeStatusText,
             .codex: codexStatusText,
             .cursor: cursorStatusText,
+            .opencode: opencodeStatusText,
         ].compactMapValues { $0 }
 
         guard !statusTexts.isEmpty else {

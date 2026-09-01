@@ -23,12 +23,14 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/api/OAuthUsageAPI.swift \
     src/api/CodexUsageAPI.swift \
     src/api/CursorUsageAPI.swift \
+    src/api/OpencodeUsageAPI.swift \
     src/TimeFormatting.swift \
     src/SoundPlayback.swift \
     src/AppDelegate+MenuAndRefresh.swift \
     src/ClaudeUsage.swift \
     src/UsageCore.swift \
     src/CodexUsageCore.swift \
+    src/OpencodeUsageCore.swift \
     -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 
 # Create Info.plist
