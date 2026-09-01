@@ -8,10 +8,13 @@ extension AppDelegate {
         menu.removeAllItems()
 
         // Pinned usage items with rate sub-items, grouped by provider
-        let showsProviderSections = codexSectionVisible
+        let showsProviderSections = codexSectionVisible || cursorSectionVisible
         addUsageSection(provider: .claude, keys: claudeCategoryKeys, showsHeader: showsProviderSections)
-        if showsProviderSections {
+        if codexSectionVisible {
             addUsageSection(provider: .codex, keys: codexCategoryKeys, showsHeader: true)
+        }
+        if cursorSectionVisible {
+            addUsageSection(provider: .cursor, keys: cursorCategoryKeys, showsHeader: true)
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -105,6 +108,15 @@ extension AppDelegate {
         codexTrackingItem.state = codexTrackingEnabled ? .on : .off
         settingsMenu.addItem(codexTrackingItem)
 
+        cursorTrackingItem = NSMenuItem(
+            title: "Track Cursor Usage",
+            action: #selector(toggleCursorTracking),
+            keyEquivalent: ""
+        )
+        cursorTrackingItem.target = self
+        cursorTrackingItem.state = cursorTrackingEnabled ? .on : .off
+        settingsMenu.addItem(cursorTrackingItem)
+
         // Keyboard Shortcut submenu
         let hotkeyMenu = NSMenu()
         hotkeyCurrentItem = NSMenuItem(title: "Current: \(hotkeyDisplayString())", action: nil, keyEquivalent: "")
@@ -189,6 +201,7 @@ extension AppDelegate {
         moreToggleItems.removeAll()
         addMoreSection(provider: .claude, keys: claudeCategoryKeys)
         addMoreSection(provider: .codex, keys: codexCategoryKeys)
+        addMoreSection(provider: .cursor, keys: cursorCategoryKeys)
         let moreItem = NSMenuItem(title: "More", action: nil, keyEquivalent: "")
         moreItem.submenu = moreMenu
         settingsMenu.addItem(moreItem)
@@ -219,6 +232,20 @@ extension AppDelegate {
         )
         debugCodexResponseItem.target = self
         debugMenu.addItem(debugCodexResponseItem)
+        let debugCursorRequestItem = NSMenuItem(
+            title: "Cursor Request",
+            action: #selector(copyCursorDebugRequest),
+            keyEquivalent: ""
+        )
+        debugCursorRequestItem.target = self
+        debugMenu.addItem(debugCursorRequestItem)
+        let debugCursorResponseItem = NSMenuItem(
+            title: "Cursor Response",
+            action: #selector(copyCursorDebugResponse),
+            keyEquivalent: ""
+        )
+        debugCursorResponseItem.target = self
+        debugMenu.addItem(debugCursorResponseItem)
         let debugItem = NSMenuItem(title: "Debug Mode", action: nil, keyEquivalent: "")
         debugItem.submenu = debugMenu
         settingsMenu.addItem(debugItem)
@@ -286,6 +313,11 @@ extension AppDelegate {
     /// Codex rows only appear once a fetch has produced usage data.
     var codexSectionVisible: Bool {
         return codexTrackingEnabled && codexAvailable
+    }
+
+    /// Cursor rows only appear once a fetch has produced usage data.
+    var cursorSectionVisible: Bool {
+        return cursorTrackingEnabled && cursorAvailable
     }
 
     func providerHeaderItem(_ provider: UsageProvider) -> NSMenuItem {
@@ -563,6 +595,22 @@ extension AppDelegate {
         refresh()
     }
 
+    @objc func toggleCursorTracking() {
+        cursorTrackingEnabled = !cursorTrackingEnabled
+        guard cursorTrackingEnabled else {
+            cursorAvailable = false
+            cursorStatusText = nil
+            if menuBarOwnership.provider == .cursor {
+                menuBarOwnership.provider = .claude
+            }
+            saveMenuBarOwnership()
+            updateStatusItemTitle()
+            rebuildMenu()
+            return
+        }
+        refresh()
+    }
+
     func updateLoginItem() {
         if #available(macOS 13.0, *) {
             do {
@@ -633,14 +681,18 @@ extension AppDelegate {
     }
 
     @objc func copyUsage() {
-        let includesCodex = codexSectionVisible
+        let showsHeaders = codexSectionVisible || cursorSectionVisible
+        let sections: [(provider: UsageProvider, keys: [String])] = [
+            (.claude, claudeCategoryKeys),
+            (.codex, codexSectionVisible ? codexCategoryKeys : []),
+            (.cursor, cursorSectionVisible ? cursorCategoryKeys : []),
+        ]
         var lines: [String] = []
 
-        for provider in [UsageProvider.claude, UsageProvider.codex] where provider == .claude || includesCodex {
-            let keys = (provider == .claude ? claudeCategoryKeys : codexCategoryKeys)
-                .filter { pinnedKeys.contains($0) }
+        for (provider, providerKeys) in sections {
+            let keys = providerKeys.filter { pinnedKeys.contains($0) }
             guard !keys.isEmpty else { continue }
-            if includesCodex {
+            if showsHeaders {
                 lines.append(providerSectionTitles[provider] ?? "")
             }
             lines.append(contentsOf: keys.compactMap { usageItems[$0] }.filter { !$0.isHidden }.map { $0.title })
@@ -669,6 +721,16 @@ extension AppDelegate {
     @objc func copyCodexDebugResponse() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lastCodexResponseForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyCursorDebugRequest() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastCursorRequestForDebug ?? "", forType: .string)
+    }
+
+    @objc func copyCursorDebugResponse() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastCursorResponseForDebug ?? "", forType: .string)
     }
 
     @objc func copyDebugCurl() {
@@ -722,6 +784,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         var claudeUsage: UsageResponse?
         var claudeRateLimited = false
         var codexUsage: CodexUsage?
+        var cursorUsage: CursorUsage?
 
         group.enter()
         fetchClaudeUsage { usage, rateLimited in
@@ -744,11 +807,28 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             }
         }
 
+        if cursorTrackingEnabled {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                fetchCursorUsage { usage in
+                    DispatchQueue.main.async {
+                        cursorUsage = usage
+                        group.leave()
+                    }
+                }
+            }
+        }
+
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.updateUI(usage: claudeUsage, rateLimited: claudeRateLimited)
             self.updateCodexUI(codexUsage)
-            self.updateMenuBarOwnership(claudeUsage: claudeUsage, codexUsage: codexUsage)
+            self.updateCursorUI(cursorUsage)
+            self.updateMenuBarOwnership(
+                claudeUsage: claudeUsage,
+                codexUsage: codexUsage,
+                cursorUsage: cursorUsage
+            )
             self.updateStatusItemTitle()
         }
     }
@@ -1047,7 +1127,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
                 usageItems[key]?.attributedTitle = nil
                 rateItems[key]?.isHidden = true
             }
-            rebuildMenuIfCodexVisibilityChanged(wasAvailable: wasAvailable)
+            rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: codexAvailable)
             return
         }
 
@@ -1065,9 +1145,10 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
 
         // The menu bar tracks the session window, matching how Claude usage is displayed,
         // and falls back to weekly on plans that report no session limit.
-        codexStatusText = statusText(for: usage?.fiveHour ?? weekly)
+        let statusWindow = usage?.fiveHour ?? weekly
+        codexStatusText = statusText(percent: statusWindow.usedPercent, resetsAt: statusWindow.resetsAt)
 
-        rebuildMenuIfCodexVisibilityChanged(wasAvailable: wasAvailable)
+        rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: codexAvailable)
     }
 
     private func updateCodexUsageItem(
@@ -1089,71 +1170,116 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
     }
 
     /// An exhausted window shows when it frees up instead of a flat 100%.
-    private func statusText(for window: CodexRateWindow?) -> String? {
-        guard let window else { return nil }
-        let pct = Int(window.usedPercent)
-        if pct >= 100, let resetDate = window.resetsAt {
-            return formatResetDate(resetDate)
+    private func statusText(percent: Double, resetsAt: Date?) -> String? {
+        let pct = Int(percent)
+        if pct >= 100, let resetsAt {
+            return formatResetDate(resetsAt)
         }
         return "\(pct)%"
     }
 
-    private func rebuildMenuIfCodexVisibilityChanged(wasAvailable: Bool) {
-        guard menuReady, wasAvailable != codexAvailable else { return }
+    private func rebuildMenuIfSectionVisibilityChanged(wasAvailable: Bool, isAvailable: Bool) {
+        guard menuReady, wasAvailable != isAvailable else { return }
         rebuildMenu()
+    }
+
+    // MARK: - Cursor
+
+    func updateCursorUI(_ usage: CursorUsage?) {
+        let wasAvailable = cursorAvailable
+
+        guard cursorTrackingEnabled, let usage else {
+            cursorAvailable = false
+            cursorStatusText = nil
+            for key in cursorCategoryKeys {
+                usageItems[key]?.title = "\(categoryLabel(for: key)): --"
+                usageItems[key]?.attributedTitle = nil
+                rateItems[key]?.isHidden = true
+            }
+            rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: cursorAvailable)
+            return
+        }
+
+        cursorAvailable = true
+        updateCursorUsageItem(key: "cursor_models", percent: usage.cursorModelsPercent, usage: usage)
+        updateCursorUsageItem(key: "cursor_other_models", percent: usage.otherModelsPercent, usage: usage)
+
+        // Both buckets reset on the same billing cycle, so the menu bar tracks whichever
+        // of the two is closest to running out.
+        cursorStatusText = statusText(percent: usage.highestPercent.rounded(.up), resetsAt: usage.cycleEndsAt)
+
+        rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: cursorAvailable)
+    }
+
+    private func updateCursorUsageItem(key: String, percent: Double, usage: CursorUsage) {
+        // Cursor's dashboard rounds these buckets up, so a bucket with any spend never reads 0%.
+        let limit = UsageLimit(
+            utilization: percent.rounded(.up),
+            resets_at: usage.cycleEndsAt.map { isoFormatter.string(from: $0) }
+        )
+        updateUsageItem(key: key, limit: limit, windowSeconds: usage.cycleSeconds)
     }
 
     // MARK: - Status Item
 
-    func updateMenuBarOwnership(claudeUsage: UsageResponse?, codexUsage: CodexUsage?) {
+    func updateMenuBarOwnership(
+        claudeUsage: UsageResponse?,
+        codexUsage: CodexUsage?,
+        cursorUsage: CursorUsage?
+    ) {
         menuBarOwnership = MenuBarOwnershipResolver.resolve(
             current: menuBarOwnership,
-            claudeUtilization: claudeUsage?.five_hour?.utilization,
-            codexUtilization: codexTrackingEnabled
-                ? (codexUsage?.fiveHour ?? codexUsage?.weekly)?.usedPercent
-                : nil
+            utilizations: [
+                .claude: claudeUsage?.five_hour?.utilization,
+                .codex: codexTrackingEnabled
+                    ? (codexUsage?.fiveHour ?? codexUsage?.weekly)?.usedPercent
+                    : nil,
+                .cursor: cursorTrackingEnabled ? cursorUsage?.highestPercent : nil,
+            ]
         )
         saveMenuBarOwnership()
     }
 
     func updateStatusItemTitle() {
-        guard claudeStatusText != nil || codexStatusText != nil else {
+        let statusTexts: [UsageProvider: String] = [
+            .claude: claudeStatusText,
+            .codex: codexStatusText,
+            .cursor: cursorStatusText,
+        ].compactMapValues { $0 }
+
+        guard !statusTexts.isEmpty else {
             statusItem.button?.title = "..."
             return
         }
-
-        if menuBarOwnership.provider == .codex, let codexStatusText {
-            statusItem.button?.title = codexStatusText
+        if let owned = statusTexts[menuBarOwnership.provider] {
+            statusItem.button?.title = owned
             return
         }
-        if let claudeStatusText {
-            statusItem.button?.title = claudeStatusText
-            return
-        }
-        if let codexStatusText {
-            statusItem.button?.title = codexStatusText
-        }
+        // The owning provider has no reading yet, so fall back in declaration order.
+        statusItem.button?.title = UsageProvider.allCases.compactMap { statusTexts[$0] }.first ?? "..."
     }
 
     func loadMenuBarOwnership() -> MenuBarOwnership {
         let defaults = UserDefaults.standard
         let provider = UsageProvider(rawValue: defaults.string(forKey: "menuBarProvider") ?? "") ?? .claude
-        return MenuBarOwnership(
-            provider: provider,
-            lastClaudeUtilization: defaults.object(forKey: "menuBarLastClaudeUtil") as? Double,
-            lastCodexUtilization: defaults.object(forKey: "menuBarLastCodexUtil") as? Double
-        )
+        // Baselines from before this was a dictionary are dropped; the next refresh restores them.
+        let stored = defaults.dictionary(forKey: "menuBarLastUtilizations") as? [String: Double] ?? [:]
+        var lastUtilizations: [UsageProvider: Double] = [:]
+        for (rawValue, utilization) in stored {
+            guard let storedProvider = UsageProvider(rawValue: rawValue) else { continue }
+            lastUtilizations[storedProvider] = utilization
+        }
+        return MenuBarOwnership(provider: provider, lastUtilizations: lastUtilizations)
     }
 
     func saveMenuBarOwnership() {
         let defaults = UserDefaults.standard
         defaults.set(menuBarOwnership.provider.rawValue, forKey: "menuBarProvider")
-        if let lastClaude = menuBarOwnership.lastClaudeUtilization {
-            defaults.set(lastClaude, forKey: "menuBarLastClaudeUtil")
+        var stored: [String: Double] = [:]
+        for (provider, utilization) in menuBarOwnership.lastUtilizations {
+            stored[provider.rawValue] = utilization
         }
-        if let lastCodex = menuBarOwnership.lastCodexUtilization {
-            defaults.set(lastCodex, forKey: "menuBarLastCodexUtil")
-        }
+        defaults.set(stored, forKey: "menuBarLastUtilizations")
     }
 
     func isDataStale() -> Bool {
