@@ -11,7 +11,7 @@ A lightweight native macOS menu bar app that displays your Claude and OpenAI Cod
 | Feature | Description |
 | ------- | ----------- |
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
-| **Codex usage** | Tracks your Codex weekly limit alongside Claude, listed under its own heading in the dropdown. |
+| **Codex usage** | Tracks your Codex 5-hour and weekly limits alongside Claude, listed under its own heading in the dropdown. |
 | **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
 | **Surfaces overage spend** | When extra usage credits tick up, the menu bar shows dollars spent instead of a percentage. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
@@ -136,11 +136,11 @@ The usage APIs are metadata-only — no inference tokens are consumed.
 
 ### Codex usage
 
-Codex is fetched independently of Claude on the same refresh cycle, and only exposes a weekly limit window:
+Codex is fetched independently of Claude on the same refresh cycle, and exposes a 5-hour and a weekly limit window:
 
 1. Reads the OAuth access token from `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`)
 2. Calls `https://chatgpt.com/backend-api/wham/usage` with `Authorization: Bearer <token>`
-3. Selects the seven-day window from the response — plans report it as either the primary or secondary window, so it is matched by window length rather than position
+3. Selects the five-hour and seven-day windows from the response — plans report them as either the primary or secondary window, so each is matched by window length rather than position. The 5-hour row is hidden on plans that report no session window.
 4. If the token is missing or rejected (for example, expired), falls back to the most recent `rate_limits` payload Codex CLI wrote into `~/.codex/sessions/`
 
 The fallback data is only as fresh as your last Codex run, so re-running `codex` refreshes both the token and the local data.
@@ -154,7 +154,7 @@ The fallback data is only as fresh as your last Codex run, so re-running `codex`
 The menu bar tracks whichever provider most recently consumed usage:
 
 - When Claude's 5-hour utilization increases, the menu bar switches to Claude
-- When Codex's weekly utilization increases, it switches to Codex
+- When Codex's 5-hour utilization increases, it switches to Codex (falling back to weekly on plans with no session window)
 - If both increased since the last refresh, the larger jump wins
 - Utilization *drops* mean a limit window reset, so they never change which provider is shown
 
@@ -189,8 +189,8 @@ All settings are accessible from the **Settings** submenu:
 - **Keyboard Shortcut** — global hotkey to open the menu (default: `Cmd+Shift+X`)
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
-- **Track Codex Usage** — fetch and display Codex weekly usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
-- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: Weekly)
+- **Track Codex Usage** — fetch and display Codex usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
+- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly)
 - **Debug Mode** — copy the latest Claude or Codex request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
 
@@ -207,7 +207,7 @@ This location is outside the app bundle, so your data survives app updates, dele
 - **Rolling samples** — recent utilization readings per category (used for rate calculations)
 - **Daily summaries** — one peak-utilization entry per day per category (used for the usage graph and long-term tracking)
 
-Codex history is stored in the same file under the `codex_weekly` category.
+Codex history is stored in the same file under the `codex_five_hour` and `codex_weekly` categories.
 
 On first launch, any existing usage data from the app's previous UserDefaults storage is automatically migrated to this file.
 

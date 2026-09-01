@@ -887,7 +887,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
                 : nil
             item.attributedTitle = tabbedMenuItemString("\(label): \(pct)%", "resets \(reset)", color: color)
 
-            let isWeekly = key != "five_hour"
+            let isWeekly = key != "five_hour" && key != "codex_five_hour"
             recordUsageSample(key, utilization: limit.utilization)
             updateRateItem(key: key, utilization: limit.utilization, isWeekly: isWeekly)
         } else {
@@ -1052,21 +1052,50 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
 
         codexAvailable = true
-        let limit = UsageLimit(
-            utilization: weekly.usedPercent,
-            resets_at: weekly.resetsAt.map { isoFormatter.string(from: $0) }
+        updateCodexUsageItem(
+            key: "codex_five_hour",
+            window: usage?.fiveHour,
+            defaultWindowSeconds: CodexWindowSelector.fiveHourWindowSeconds
         )
-        let windowSeconds = weekly.windowSeconds > 0 ? weekly.windowSeconds : CodexWindowSelector.weeklyWindowSeconds
-        updateUsageItem(key: "codex_weekly", limit: limit, windowSeconds: windowSeconds)
+        updateCodexUsageItem(
+            key: "codex_weekly",
+            window: weekly,
+            defaultWindowSeconds: CodexWindowSelector.weeklyWindowSeconds
+        )
 
-        let pct = Int(weekly.usedPercent)
-        if pct >= 100, let resetDate = weekly.resetsAt {
-            codexStatusText = formatResetDate(resetDate)
-        } else {
-            codexStatusText = "\(pct)%"
-        }
+        // The menu bar tracks the session window, matching how Claude usage is displayed,
+        // and falls back to weekly on plans that report no session limit.
+        codexStatusText = statusText(for: usage?.fiveHour ?? weekly)
 
         rebuildMenuIfCodexVisibilityChanged(wasAvailable: wasAvailable)
+    }
+
+    private func updateCodexUsageItem(
+        key: String,
+        window: CodexRateWindow?,
+        defaultWindowSeconds: TimeInterval
+    ) {
+        usageItems[key]?.isHidden = window == nil
+        guard let window else {
+            updateUsageItem(key: key, limit: nil)
+            return
+        }
+        let limit = UsageLimit(
+            utilization: window.usedPercent,
+            resets_at: window.resetsAt.map { isoFormatter.string(from: $0) }
+        )
+        let windowSeconds = window.windowSeconds > 0 ? window.windowSeconds : defaultWindowSeconds
+        updateUsageItem(key: key, limit: limit, windowSeconds: windowSeconds)
+    }
+
+    /// An exhausted window shows when it frees up instead of a flat 100%.
+    private func statusText(for window: CodexRateWindow?) -> String? {
+        guard let window else { return nil }
+        let pct = Int(window.usedPercent)
+        if pct >= 100, let resetDate = window.resetsAt {
+            return formatResetDate(resetDate)
+        }
+        return "\(pct)%"
     }
 
     private func rebuildMenuIfCodexVisibilityChanged(wasAvailable: Bool) {
@@ -1080,7 +1109,9 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         menuBarOwnership = MenuBarOwnershipResolver.resolve(
             current: menuBarOwnership,
             claudeUtilization: claudeUsage?.five_hour?.utilization,
-            codexUtilization: codexTrackingEnabled ? codexUsage?.weekly?.usedPercent : nil
+            codexUtilization: codexTrackingEnabled
+                ? (codexUsage?.fiveHour ?? codexUsage?.weekly)?.usedPercent
+                : nil
         )
         saveMenuBarOwnership()
     }

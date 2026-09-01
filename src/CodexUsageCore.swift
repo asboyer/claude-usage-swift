@@ -11,7 +11,9 @@ struct CodexRateWindow: Equatable {
 
 enum CodexWindowSelector {
     static let weeklyWindowSeconds: TimeInterval = 7 * 86400
+    static let fiveHourWindowSeconds: TimeInterval = 5 * 3600
     private static let weeklyMatchTolerance: TimeInterval = 12 * 3600
+    private static let fiveHourMatchTolerance: TimeInterval = 1800
 
     /// Picks the window that tracks Codex weekly usage.
     /// Plans report it as either the primary or secondary window, so windows are matched by
@@ -24,6 +26,14 @@ enum CodexWindowSelector {
             return weekly
         }
         return windows.max { $0.windowSeconds < $1.windowSeconds }
+    }
+
+    /// Picks the window that tracks Codex session usage.
+    /// Unlike the weekly window there is no fallback: a plan that only reports a long window
+    /// has no session limit to show.
+    static func selectFiveHour(primary: CodexRateWindow?, secondary: CodexRateWindow?) -> CodexRateWindow? {
+        let windows = [primary, secondary].compactMap { $0 }
+        return windows.first { abs($0.windowSeconds - fiveHourWindowSeconds) <= fiveHourMatchTolerance }
     }
 }
 
