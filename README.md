@@ -1,6 +1,6 @@
 # Claude Usage Tracker (Swift)
 
-A lightweight native macOS menu bar app that displays your Claude and OpenAI Codex usage limits and reset times.
+A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex, and Cursor usage limits and reset times.
 
 ![macOS](https://img.shields.io/badge/macOS-13.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
@@ -12,6 +12,7 @@ A lightweight native macOS menu bar app that displays your Claude and OpenAI Cod
 | ------- | ----------- |
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
 | **Codex usage** | Tracks your Codex 5-hour and weekly limits alongside Claude, listed under its own heading in the dropdown. |
+| **Cursor usage** | Tracks the two included-usage buckets on your Cursor plan — Cursor Models and Other Models — under its own heading. |
 | **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
 | **Surfaces overage spend** | When extra usage credits tick up, the menu bar shows dollars spent instead of a percentage. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
@@ -149,16 +150,42 @@ The fallback data is only as fresh as your last Codex run, so re-running `codex`
 
 > The Codex usage endpoint is an internal, undocumented ChatGPT API. It is not covered by any stability guarantee and its shape may change.
 
+### Cursor usage
+
+Cursor is fetched independently on the same refresh cycle. Unlike Claude and Codex it has no
+rolling window: usage is a dollar budget that resets on your billing cycle, split across two
+buckets that are metered separately.
+
+1. Reads the access token the Cursor CLI stores in the login keychain (`cursor-access-token` / `cursor-user`)
+2. Calls `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`
+3. Shows `autoPercentUsed` as **Cursor Models** (Composer, Cursor Grok) and `apiPercentUsed` as **Other Models**, both resetting at the end of the billing cycle
+
+The two buckets have different limits, so their percentages are not comparable to each other —
+they are the same two bars Cursor shows under Plan & Usage, rounded up the same way. The menu bar
+tracks whichever bucket is closest to running out.
+
+The token is read by running `/usr/bin/security`, the same binary the Cursor CLI uses to store it.
+Reading it any other way would prompt for keychain access on every launch.
+
+**Requires**: Cursor CLI installed and logged in (`cursor-agent login`). Cursor writes no usage
+snapshot to disk, so there is no offline fallback — if the token is missing or rejected, the Cursor
+section is hidden and the app behaves exactly as before.
+
+> The Cursor usage endpoint is an internal, undocumented API used by the Cursor client. It is not
+> covered by any stability guarantee and its shape may change. Cursor's documented Admin and
+> Analytics APIs report team-wide activity, not your own included-usage percentages.
+
 ### Which provider the menu bar shows
 
 The menu bar tracks whichever provider most recently consumed usage:
 
 - When Claude's 5-hour utilization increases, the menu bar switches to Claude
 - When Codex's 5-hour utilization increases, it switches to Codex (falling back to weekly on plans with no session window)
-- If both increased since the last refresh, the larger jump wins
+- When either Cursor bucket increases, it switches to Cursor
+- If more than one increased since the last refresh, the larger jump wins
 - Utilization *drops* mean a limit window reset, so they never change which provider is shown
 
-The menu bar shows the percentage on its own, with no provider label. Open the dropdown to see both providers broken out.
+The menu bar shows the percentage on its own, with no provider label. Open the dropdown to see every provider broken out.
 
 ### When the menu bar shows dollars instead of a percentage
 
@@ -190,8 +217,9 @@ All settings are accessible from the **Settings** submenu:
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **Track Codex Usage** — fetch and display Codex usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
-- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly)
-- **Debug Mode** — copy the latest Claude or Codex request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
+- **Track Cursor Usage** — fetch and display Cursor usage (on by default; turning it off hides the Cursor section)
+- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly — Cursor: Cursor Models, Other Models)
+- **Debug Mode** — copy the latest Claude, Codex, or Cursor request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
 
 ## Data Storage
@@ -207,7 +235,8 @@ This location is outside the app bundle, so your data survives app updates, dele
 - **Rolling samples** — recent utilization readings per category (used for rate calculations)
 - **Daily summaries** — one peak-utilization entry per day per category (used for the usage graph and long-term tracking)
 
-Codex history is stored in the same file under the `codex_five_hour` and `codex_weekly` categories.
+Codex history is stored in the same file under the `codex_five_hour` and `codex_weekly` categories, and
+Cursor under `cursor_models` and `cursor_other_models`.
 
 On first launch, any existing usage data from the app's previous UserDefaults storage is automatically migrated to this file.
 
@@ -248,6 +277,16 @@ The Codex section only appears once a fetch returns data. Check, in order:
 3. Settings → Debug Mode → **Codex Response** shows the API reply — a 401 there means the token expired, and re-running `codex` refreshes it
 
 Until the token is refreshed the app falls back to your most recent local Codex session, which may lag behind actual usage.
+
+### Cursor usage is missing
+
+The Cursor section only appears once a fetch returns data. Check, in order:
+
+1. `cursor-agent status` reports you are logged in (run `cursor-agent login` if not)
+2. Settings → **Track Cursor Usage** is checked
+3. Settings → Debug Mode → **Cursor Response** shows the API reply — a 401 there means the token expired, and re-running `cursor-agent login` refreshes it
+
+Cursor keeps no usage snapshot on disk, so there is nothing to fall back to while the token is stale.
 
 ### App won't open (macOS security)
 
