@@ -234,6 +234,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 restored.formUnion(codexCategoryKeys)
                 ud.set(true, forKey: "codexPinMigrated")
             }
+            // Codex gained a session limit window after the first Codex pin migration.
+            if !ud.bool(forKey: "codexFiveHourPinMigrated") {
+                restored.insert("codex_five_hour")
+                ud.set(true, forKey: "codexFiveHourPinMigrated")
+            }
             // The API replaced the per-model weekly fields with a single scoped limit.
             if !ud.bool(forKey: "scopedWeeklyPinMigrated") {
                 restored.insert(scopedWeeklyKey)
@@ -243,6 +248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             pinnedKeys = restored
         } else {
             ud.set(true, forKey: "codexPinMigrated")
+            ud.set(true, forKey: "codexFiveHourPinMigrated")
             ud.set(true, forKey: "scopedWeeklyPinMigrated")
         }
 

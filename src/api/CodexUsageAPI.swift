@@ -8,6 +8,7 @@ enum CodexUsageSource: String {
 }
 
 struct CodexUsage {
+    let fiveHour: CodexRateWindow?
     let weekly: CodexRateWindow?
     let planType: String?
     let source: CodexUsageSource
@@ -144,15 +145,17 @@ func fetchCodexUsage(completion: @escaping (CodexUsage?) -> Void) {
             return
         }
 
-        let weekly = CodexWindowSelector.selectWeekly(
-            primary: window(from: usage.rate_limit?.primary_window),
-            secondary: window(from: usage.rate_limit?.secondary_window)
-        )
+        let primary = window(from: usage.rate_limit?.primary_window)
+        let secondary = window(from: usage.rate_limit?.secondary_window)
+        let weekly = CodexWindowSelector.selectWeekly(primary: primary, secondary: secondary)
         guard weekly != nil else {
             completion(readCodexUsageFromLocalSessions())
             return
         }
-        completion(CodexUsage(weekly: weekly, planType: usage.plan_type, source: .api))
+        let fiveHour = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
+        completion(
+            CodexUsage(fiveHour: fiveHour, weekly: weekly, planType: usage.plan_type, source: .api)
+        )
     }.resume()
 }
 
@@ -206,12 +209,16 @@ private func readCodexUsage(fromSessionFile url: URL) -> CodexUsage? {
             continue
         }
 
-        let weekly = CodexWindowSelector.selectWeekly(
-            primary: window(from: decoded.primary),
-            secondary: window(from: decoded.secondary)
+        let primary = window(from: decoded.primary)
+        let secondary = window(from: decoded.secondary)
+        guard let weekly = CodexWindowSelector.selectWeekly(primary: primary, secondary: secondary) else { continue }
+        let fiveHour = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
+        return CodexUsage(
+            fiveHour: fiveHour,
+            weekly: weekly,
+            planType: decoded.plan_type,
+            source: .localSession
         )
-        guard let weekly else { continue }
-        return CodexUsage(weekly: weekly, planType: decoded.plan_type, source: .localSession)
     }
     return nil
 }

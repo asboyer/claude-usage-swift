@@ -33,6 +33,28 @@ final class CodexUsageCoreTests: XCTestCase {
         XCTAssertNil(CodexWindowSelector.selectWeekly(primary: nil, secondary: nil))
     }
 
+    // MARK: - Five Hour Window Selection
+
+    func testSelectFiveHourPicksTheSessionWindow() {
+        let primary = window(usedPercent: 99, windowSeconds: 18000)
+        let secondary = window(usedPercent: 62, windowSeconds: 604_800)
+        let selected = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
+        XCTAssertEqual(selected, primary)
+    }
+
+    func testSelectFiveHourPicksSecondaryWhenPrimaryIsWeekly() {
+        let primary = window(usedPercent: 62, windowSeconds: 604_800)
+        let secondary = window(usedPercent: 99, windowSeconds: 18000)
+        let selected = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
+        XCTAssertEqual(selected, secondary)
+    }
+
+    func testSelectFiveHourReturnsNilWhenNoSessionWindowIsReported() {
+        let primary = window(usedPercent: 62, windowSeconds: 604_800)
+        let secondary = window(usedPercent: 20, windowSeconds: 30 * 86400)
+        XCTAssertNil(CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary))
+    }
+
     // MARK: - Menu Bar Ownership
 
     func testOwnershipMovesToCodexWhenCodexIncreases() {

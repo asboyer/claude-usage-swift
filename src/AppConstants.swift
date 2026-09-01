@@ -13,8 +13,8 @@ let claudeCategoryKeys: [String] = [
     "seven_day_sonnet", "seven_day_oauth_apps", "seven_day_cowork",
 ]
 
-// Codex usage categories. Codex only exposes a weekly limit window.
-let codexCategoryKeys: [String] = ["codex_weekly"]
+// Codex usage categories, ordered like Claude's: session window first, then weekly.
+let codexCategoryKeys: [String] = ["codex_five_hour", "codex_weekly"]
 
 // All trackable usage categories.
 let allCategoryKeys: [String] = claudeCategoryKeys + codexCategoryKeys
@@ -28,6 +28,7 @@ let categoryLabels: [String: String] = [
     "seven_day_oauth_apps": "OAuth Apps",
     "seven_day_cowork": "Cowork",
     "extra_usage": "Extra",
+    "codex_five_hour": "5-hour",
     "codex_weekly": "Weekly",
 ]
 
@@ -44,5 +45,5 @@ let providerSectionTitles: [UsageProvider: String] = [
 ]
 
 let defaultPinnedKeys: Set<String> = [
-    "five_hour", "seven_day", scopedWeeklyKey, "extra_usage", "codex_weekly",
+    "five_hour", "seven_day", scopedWeeklyKey, "extra_usage", "codex_five_hour", "codex_weekly",
 ]
