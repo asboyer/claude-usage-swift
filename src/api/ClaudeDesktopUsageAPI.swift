@@ -106,10 +106,12 @@ private func getClaudeCookie(name: String, key: Data) -> String? {
     else { return nil }
     defer { sqlite3_close(db) }
 
-    let query = "SELECT encrypted_value FROM cookies WHERE host_key = '.claude.ai' AND name = '\(name)' LIMIT 1;"
+    let query = "SELECT encrypted_value FROM cookies WHERE host_key = '.claude.ai' AND name = ? LIMIT 1;"
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else { return nil }
     defer { sqlite3_finalize(statement) }
+
+    sqlite3_bind_text(statement, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 
     if sqlite3_step(statement) == SQLITE_ROW, let blobPtr = sqlite3_column_blob(statement, 0) {
         let size = Int(sqlite3_column_bytes(statement, 0))
