@@ -29,7 +29,7 @@ Use subfolders for shared functionality:
 - `src/api/`
   - network/API models, request logic, auth/token access
   - one file per upstream provider (`ClaudeDesktopUsageAPI`, `OAuthUsageAPI`, `CodexUsageAPI`,
-    `CursorUsageAPI`)
+    `CursorUsageAPI`, `OpencodeUsageAPI`)
 - `src/graph/`
   - usage graph/heatmap generation and related rendering logic
 - `src/history/`

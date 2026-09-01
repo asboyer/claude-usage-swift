@@ -1,6 +1,6 @@
 # Claude Usage Tracker (Swift)
 
-A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex, and Cursor usage limits and reset times.
+A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex, Cursor, and opencode usage limits and reset times.
 
 ![macOS](https://img.shields.io/badge/macOS-13.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
@@ -13,6 +13,7 @@ A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex,
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
 | **Codex usage** | Tracks your Codex 5-hour and weekly limits alongside Claude, listed under its own heading in the dropdown. |
 | **Cursor usage** | Tracks the two included-usage buckets on your Cursor plan — Cursor Models and Other Models — under its own heading. |
+| **Opencode spend** | Shows month-to-date dollars per model, read from opencode's own session database. No API key, no network call. |
 | **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
 | **Surfaces overage spend** | When extra usage credits tick up, the menu bar shows dollars spent instead of a percentage. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
@@ -175,6 +176,32 @@ section is hidden and the app behaves exactly as before.
 > covered by any stability guarantee and its shape may change. Cursor's documented Admin and
 > Analytics APIs report team-wide activity, not your own included-usage percentages.
 
+### Opencode spend
+
+Opencode is the one provider that reports **dollars, not a percentage of a limit** — you pay per
+token, so there is no limit to be a percentage of. It is also the only one read entirely offline.
+
+1. Opens `~/.local/share/opencode/opencode.db` read-only (opencode's own SQLite session store)
+2. Sums `cost` over every completed assistant turn since the 1st of the current month
+3. Lists each model's month-to-date spend, most expensive first
+
+The section shows the three priciest models, with **More** revealing every model that cost
+anything (and **Less** collapsing it again). Models that cost nothing are never listed: a
+subscription-billed provider such as a ChatGPT plan reports `cost: 0` on every turn, and thousands
+of free turns would otherwise crowd out the models you are actually paying for.
+
+The database is opened read-only, so a running opencode is never blocked or modified. Opencode
+inserts the assistant row when a turn begins and fills in `cost` when it finishes, so an in-flight
+turn contributes nothing until the next refresh picks it up.
+
+**Requires**: opencode installed and used at least once this month. There is no API key and no
+network request. If the database is missing or has no paid turns this month, the section is hidden
+and the app behaves exactly as before.
+
+> The `cost` figure is opencode's own calculation — its token counts times its pricing table — not
+> a provider invoice. Expect it to land close to, but not exactly on, what Anthropic or Fireworks
+> eventually bill. For the authoritative number, use the provider's billing API.
+
 ### Which provider the menu bar shows
 
 The menu bar tracks whichever provider most recently consumed usage:
@@ -182,6 +209,7 @@ The menu bar tracks whichever provider most recently consumed usage:
 - When Claude's 5-hour utilization increases, the menu bar switches to Claude
 - When Codex's 5-hour utilization increases, it switches to Codex (falling back to weekly on plans with no session window)
 - When either Cursor bucket increases, it switches to Cursor
+- When opencode's month-to-date spend increases, it switches to opencode
 - If more than one increased since the last refresh, the larger jump wins
 - Utilization *drops* mean a limit window reset, so they never change which provider is shown
 
@@ -218,6 +246,7 @@ All settings are accessible from the **Settings** submenu:
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **Track Codex Usage** — fetch and display Codex usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
 - **Track Cursor Usage** — fetch and display Cursor usage (on by default; turning it off hides the Cursor section)
+- **Track Opencode** — read and display opencode spend (on by default; turning it off hides the Opencode section)
 - **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly — Cursor: Cursor Models, Other Models)
 - **Debug Mode** — copy the latest Claude, Codex, or Cursor request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
