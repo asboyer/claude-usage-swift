@@ -180,17 +180,21 @@ enum StatusDisplayModeSelector {
 // MARK: - Extra Usage Row Visibility
 
 enum ExtraUsageRowVisibility {
-    /// Credits can start accruing while every percentage is still under 100, so spend
-    /// itself is the signal — the scoped weekly limit only gates the $0 case.
+    /// Extra usage is only reachable once a limit is exhausted — the per-model weekly
+    /// limit or the overall weekly plan. `used_credits` is a cumulative monthly total,
+    /// so it stays non-zero all month and cannot serve as the signal.
     static func shouldShow(
         alwaysShow: Bool,
-        spentCredits: Double?,
-        scopedWeeklyUtilization: Double?
+        scopedWeeklyUtilization: Double?,
+        overallWeeklyUtilization: Double?
     ) -> Bool {
         if alwaysShow { return true }
-        if let spentCredits, spentCredits > 0 { return true }
-        guard let scopedWeeklyUtilization else { return false }
-        return scopedWeeklyUtilization >= 100
+        return isExhausted(scopedWeeklyUtilization) || isExhausted(overallWeeklyUtilization)
+    }
+
+    private static func isExhausted(_ utilization: Double?) -> Bool {
+        guard let utilization else { return false }
+        return utilization >= 100
     }
 }
 
