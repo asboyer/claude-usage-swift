@@ -1250,7 +1250,11 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         // The menu bar tracks the session window, matching how Claude usage is displayed,
         // and falls back to weekly on plans that report no session limit.
         let statusWindow = usage?.fiveHour ?? weekly
-        codexStatusText = statusText(percent: statusWindow.usedPercent, resetsAt: statusWindow.resetsAt)
+        if statusWindow.hasExpired {
+            codexStatusText = "--"
+        } else {
+            codexStatusText = statusText(percent: statusWindow.usedPercent, resetsAt: statusWindow.resetsAt)
+        }
 
         rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: codexAvailable)
     }
@@ -1265,12 +1269,25 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             updateUsageItem(key: key, limit: nil)
             return
         }
+        if window.hasExpired {
+            showExpiredCodexRow(key: key)
+            return
+        }
         let limit = UsageLimit(
             utilization: window.usedPercent,
             resets_at: window.resetsAt.map { isoFormatter.string(from: $0) }
         )
         let windowSeconds = window.windowSeconds > 0 ? window.windowSeconds : defaultWindowSeconds
         updateUsageItem(key: key, limit: limit, windowSeconds: windowSeconds)
+    }
+
+    /// Dashes stand in for a rolled-over window so the last reading is not mistaken for a live one.
+    private func showExpiredCodexRow(key: String) {
+        guard let item = usageItems[key] else { return }
+        let label = categoryLabel(for: key)
+        item.title = "\(label): -- (resets ---)"
+        item.attributedTitle = tabbedMenuItemString("\(label): --", "resets ---")
+        rateItems[key]?.isHidden = true
     }
 
     /// An exhausted window shows when it frees up instead of a flat 100%.
