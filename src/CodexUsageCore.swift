@@ -7,6 +7,13 @@ struct CodexRateWindow: Equatable {
     let usedPercent: Double
     let windowSeconds: TimeInterval
     let resetsAt: Date?
+
+    /// A window past its reset time holds a reading from a window that already rolled over,
+    /// which Codex only replaces on its next report.
+    var hasExpired: Bool {
+        guard let resetsAt else { return false }
+        return resetsAt <= Date()
+    }
 }
 
 enum CodexWindowSelector {
