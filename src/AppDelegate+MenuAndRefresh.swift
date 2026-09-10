@@ -1089,6 +1089,13 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
         lastScopedWeeklyUtilization = scoped?.limit.utilization
         updateUsageItem(key: scopedWeeklyKey, limit: scoped?.limit, windowSeconds: 7 * 86400)
+
+        // Plans without a per-model weekly limit never return this entry; hide the row
+        // rather than leave a permanent "Model: --".
+        usageItems[scopedWeeklyKey]?.isHidden = scoped == nil
+        if scoped == nil {
+            rateItems[scopedWeeklyKey]?.isHidden = true
+        }
     }
 
     /// Hides the Extra row until a weekly limit is exhausted, unless pinned open by the setting.
