@@ -300,6 +300,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let label = categoryLabel(for: key)
             let item = NSMenuItem(title: "\(label): ...", action: #selector(noop), keyEquivalent: "")
             item.target = self
+            // The scoped weekly row only applies to plans with a per-model weekly limit;
+            // stay hidden until a fetch reports one.
+            item.isHidden = key == scopedWeeklyKey
             usageItems[key] = item
 
             let rateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
