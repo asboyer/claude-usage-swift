@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 private let userAgents: [String] = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -16,18 +15,8 @@ var lastResponseForDebug: String?
 var lastUserAgentForDebug: String?
 
 func getOAuthToken() -> String? {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "Claude Code-credentials",
-        kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitOne,
-    ]
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
     guard
-        status == errSecSuccess,
-        let data = result as? Data,
-        let json = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        let json = keychainPassword(service: "Claude Code-credentials"),
         let jsonData = json.data(using: .utf8),
         let credentials = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
         let oauth = credentials["claudeAiOauth"] as? [String: Any],
