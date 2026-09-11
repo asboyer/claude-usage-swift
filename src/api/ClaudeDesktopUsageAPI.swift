@@ -1,22 +1,13 @@
 import CommonCrypto
 import Foundation
-import Security
 import SQLite3
 
 // MARK: - Claude Desktop cookie-based usage (claude-web-usage strategy)
 
 private func getClaudeDesktopEncryptionKey() -> Data? {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "Claude Safe Storage",
-        kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitOne,
-    ]
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
     guard
-        status == errSecSuccess,
-        let passwordData = result as? Data,
+        let password = keychainPassword(service: "Claude Safe Storage"),
+        let passwordData = password.data(using: .utf8),
         !passwordData.isEmpty
     else {
         return nil

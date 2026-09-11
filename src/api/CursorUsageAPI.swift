@@ -36,32 +36,8 @@ private let cursorKeychainAccount = "cursor-user"
 private let cursorKeychainService = "cursor-access-token"
 
 /// Reads the token the Cursor CLI stores in the login keychain.
-///
-/// The CLI writes the item by shelling out to `/usr/bin/security`, so reading it back the same way
-/// inherits the access already granted to that binary. Calling the Security framework directly from
-/// this app would be a different caller and would prompt for keychain access on every launch.
 func getCursorAccessToken() -> String? {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-    process.arguments = [
-        "find-generic-password", "-a", cursorKeychainAccount, "-s", cursorKeychainService, "-w",
-    ]
-    let output = Pipe()
-    process.standardOutput = output
-    process.standardError = Pipe()
-
-    do {
-        try process.run()
-    } catch {
-        return nil
-    }
-    let data = output.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-
-    guard process.terminationStatus == 0 else { return nil }
-    let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let token, !token.isEmpty else { return nil }
-    return token
+    keychainPassword(service: cursorKeychainService, account: cursorKeychainAccount)
 }
 
 private func date(fromMilliseconds string: String?) -> Date? {
