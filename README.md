@@ -283,7 +283,22 @@ The OAuth usage API (`api.anthropic.com/api/oauth/usage`) is returning 429. Swit
 
 ### Keychain access prompt
 
-The app may ask for access to Keychain items **Claude Code-credentials** (OAuth) and/or **Claude Safe Storage** (Claude Desktop cookies). Choose **Allow** or **Always Allow** so it can read usage. Access is attributed to **ClaudeUsage** (the app), not the `security` CLI. To revoke later: Keychain Access → find the item → Access Control → remove ClaudeUsage.
+The app may ask for access to Keychain items **Claude Code-credentials** (OAuth) and/or **Claude Safe Storage** (Claude Desktop cookies). Choose **Allow** or **Always Allow** so it can read usage.
+
+Credentials are read by shelling out to `/usr/bin/security`, so access is attributed to that binary rather than to ClaudeUsage. To revoke later: Keychain Access → find the item → Access Control → remove the entry.
+
+**If Always Allow does not stick,** your build is signed ad-hoc. macOS pins each grant to the requesting binary's designated requirement, and an ad-hoc signature has no stable one — so the grant is pinned to that exact build hash and dies on the next `./build.sh`. Create a signing identity once:
+
+```bash
+./scripts/create-signing-identity.sh
+./build.sh
+```
+
+The app then signs as `identifier "com.claude.usage-tracker" and certificate leaf = ...`, which does not change between builds, so one Always Allow holds. Verify with `codesign -d -r- ClaudeUsage.app`; it should not say `adhoc`.
+
+Grants recorded by earlier ad-hoc builds stay in the item's ACL as dead entries. They grant nothing, but you can clear them in Keychain Access → the item → **Get Info** → **Access Control** → select the stale **ClaudeUsage** rows → **−**.
+
+**Escape hatch (unsigned local builds):** Keychain Access → login → the item → Get Info → Access Control → **Allow all applications to access this item**. Rebuild-proof, but it widens access to every process running as you — and since `security find-generic-password` already works without a prompt for `Claude Code-credentials`, it concedes less than it sounds like. Prefer the signing identity.
 
 ### Usage shows 0% or doesn't update
 
