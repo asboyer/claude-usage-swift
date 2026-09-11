@@ -1,85 +1,86 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ClaudeUsageCore
 
-final class CodexUsageCoreTests: XCTestCase {
+struct CodexUsageCoreTests {
     private func window(usedPercent: Double, windowSeconds: TimeInterval) -> CodexRateWindow {
         return CodexRateWindow(usedPercent: usedPercent, windowSeconds: windowSeconds, resetsAt: nil)
     }
 
     // MARK: - Weekly Window Selection
 
-    func testSelectWeeklyPicksPrimaryWhenItIsTheSevenDayWindow() {
+    @Test func selectWeeklyPicksPrimaryWhenItIsTheSevenDayWindow() {
         let primary = window(usedPercent: 12, windowSeconds: 604_800)
         let selected = CodexWindowSelector.selectWeekly(primary: primary, secondary: nil)
-        XCTAssertEqual(selected, primary)
+        #expect(selected == primary)
     }
 
-    func testSelectWeeklyPicksSecondaryWhenPrimaryIsTheSessionWindow() {
+    @Test func selectWeeklyPicksSecondaryWhenPrimaryIsTheSessionWindow() {
         let primary = window(usedPercent: 40, windowSeconds: 5 * 3600)
         let secondary = window(usedPercent: 12, windowSeconds: 604_800)
         let selected = CodexWindowSelector.selectWeekly(primary: primary, secondary: secondary)
-        XCTAssertEqual(selected, secondary)
+        #expect(selected == secondary)
     }
 
-    func testSelectWeeklyFallsBackToLongestWindowWhenNoneIsSevenDays() {
+    @Test func selectWeeklyFallsBackToLongestWindowWhenNoneIsSevenDays() {
         let primary = window(usedPercent: 40, windowSeconds: 5 * 3600)
         let secondary = window(usedPercent: 12, windowSeconds: 30 * 86400)
         let selected = CodexWindowSelector.selectWeekly(primary: primary, secondary: secondary)
-        XCTAssertEqual(selected, secondary)
+        #expect(selected == secondary)
     }
 
-    func testSelectWeeklyReturnsNilWithoutWindows() {
-        XCTAssertNil(CodexWindowSelector.selectWeekly(primary: nil, secondary: nil))
+    @Test func selectWeeklyReturnsNilWithoutWindows() {
+        #expect(CodexWindowSelector.selectWeekly(primary: nil, secondary: nil) == nil)
     }
 
     // MARK: - Five Hour Window Selection
 
-    func testSelectFiveHourPicksTheSessionWindow() {
+    @Test func selectFiveHourPicksTheSessionWindow() {
         let primary = window(usedPercent: 99, windowSeconds: 18000)
         let secondary = window(usedPercent: 62, windowSeconds: 604_800)
         let selected = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
-        XCTAssertEqual(selected, primary)
+        #expect(selected == primary)
     }
 
-    func testSelectFiveHourPicksSecondaryWhenPrimaryIsWeekly() {
+    @Test func selectFiveHourPicksSecondaryWhenPrimaryIsWeekly() {
         let primary = window(usedPercent: 62, windowSeconds: 604_800)
         let secondary = window(usedPercent: 99, windowSeconds: 18000)
         let selected = CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary)
-        XCTAssertEqual(selected, secondary)
+        #expect(selected == secondary)
     }
 
-    func testSelectFiveHourReturnsNilWhenNoSessionWindowIsReported() {
+    @Test func selectFiveHourReturnsNilWhenNoSessionWindowIsReported() {
         let primary = window(usedPercent: 62, windowSeconds: 604_800)
         let secondary = window(usedPercent: 20, windowSeconds: 30 * 86400)
-        XCTAssertNil(CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary))
+        #expect(CodexWindowSelector.selectFiveHour(primary: primary, secondary: secondary) == nil)
     }
 
     // MARK: - Menu Bar Ownership
 
-    func testOwnershipMovesToCodexWhenCodexIncreases() {
+    @Test func ownershipMovesToCodexWhenCodexIncreases() {
         let current = MenuBarOwnership(provider: .claude, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: 40, .codex: 14]
         )
 
-        XCTAssertEqual(updated.provider, .codex)
-        XCTAssertEqual(updated.lastUtilizations[.codex], 14)
-        XCTAssertEqual(updated.lastUtilizations[.claude], 40)
+        #expect(updated.provider == .codex)
+        #expect(updated.lastUtilizations[.codex] == 14)
+        #expect(updated.lastUtilizations[.claude] == 40)
     }
 
-    func testOwnershipMovesToClaudeWhenClaudeIncreases() {
+    @Test func ownershipMovesToClaudeWhenClaudeIncreases() {
         let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: 46, .codex: 10]
         )
 
-        XCTAssertEqual(updated.provider, .claude)
+        #expect(updated.provider == .claude)
     }
 
-    func testOwnershipMovesToCursorWhenCursorIncreases() {
+    @Test func ownershipMovesToCursorWhenCursorIncreases() {
         let current = MenuBarOwnership(
             provider: .claude,
             lastUtilizations: [.claude: 40, .codex: 10, .cursor: 2]
@@ -89,11 +90,11 @@ final class CodexUsageCoreTests: XCTestCase {
             utilizations: [.claude: 40, .codex: 10, .cursor: 6]
         )
 
-        XCTAssertEqual(updated.provider, .cursor)
-        XCTAssertEqual(updated.lastUtilizations[.cursor], 6)
+        #expect(updated.provider == .cursor)
+        #expect(updated.lastUtilizations[.cursor] == 6)
     }
 
-    func testOwnershipPrefersLargerIncreaseWhenAllMoved() {
+    @Test func ownershipPrefersLargerIncreaseWhenAllMoved() {
         let current = MenuBarOwnership(
             provider: .claude,
             lastUtilizations: [.claude: 40, .codex: 10, .cursor: 2]
@@ -103,61 +104,61 @@ final class CodexUsageCoreTests: XCTestCase {
             utilizations: [.claude: 41, .codex: 18, .cursor: 3]
         )
 
-        XCTAssertEqual(updated.provider, .codex)
+        #expect(updated.provider == .codex)
     }
 
-    func testOwnershipIsUnchangedWhenNeitherIncreases() {
+    @Test func ownershipIsUnchangedWhenNeitherIncreases() {
         let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: 40, .codex: 10]
         )
 
-        XCTAssertEqual(updated.provider, .codex)
+        #expect(updated.provider == .codex)
     }
 
-    func testLimitResetDoesNotTransferOwnership() {
+    @Test func limitResetDoesNotTransferOwnership() {
         let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 90])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: 5, .codex: 0]
         )
 
-        XCTAssertEqual(updated.provider, .codex)
-        XCTAssertEqual(updated.lastUtilizations[.claude], 5)
-        XCTAssertEqual(updated.lastUtilizations[.codex], 0)
+        #expect(updated.provider == .codex)
+        #expect(updated.lastUtilizations[.claude] == 5)
+        #expect(updated.lastUtilizations[.codex] == 0)
     }
 
-    func testOwnershipFallsToTheOnlyProviderWithData() {
+    @Test func ownershipFallsToTheOnlyProviderWithData() {
         let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: 40, .codex: nil]
         )
 
-        XCTAssertEqual(updated.provider, .claude)
-        XCTAssertEqual(updated.lastUtilizations[.codex], 10)
+        #expect(updated.provider == .claude)
+        #expect(updated.lastUtilizations[.codex] == 10)
     }
 
-    func testOwnershipIsUnchangedWhenNoProviderHasData() {
+    @Test func ownershipIsUnchangedWhenNoProviderHasData() {
         let current = MenuBarOwnership(provider: .codex, lastUtilizations: [.claude: 40, .codex: 10])
         let updated = MenuBarOwnershipResolver.resolve(
             current: current,
             utilizations: [.claude: nil, .codex: nil, .cursor: nil]
         )
 
-        XCTAssertEqual(updated, current)
+        #expect(updated == current)
     }
 
-    func testFirstReadingKeepsDefaultOwnerAndStoresBaselines() {
+    @Test func firstReadingKeepsDefaultOwnerAndStoresBaselines() {
         let updated = MenuBarOwnershipResolver.resolve(
             current: .claudeDefault,
             utilizations: [.claude: 40, .codex: 10, .cursor: 4]
         )
 
-        XCTAssertEqual(updated.provider, .claude)
-        XCTAssertEqual(updated.lastUtilizations[.claude], 40)
-        XCTAssertEqual(updated.lastUtilizations[.codex], 10)
-        XCTAssertEqual(updated.lastUtilizations[.cursor], 4)
+        #expect(updated.provider == .claude)
+        #expect(updated.lastUtilizations[.claude] == 40)
+        #expect(updated.lastUtilizations[.codex] == 10)
+        #expect(updated.lastUtilizations[.cursor] == 4)
     }
 }

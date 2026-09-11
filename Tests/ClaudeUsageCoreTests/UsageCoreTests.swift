@@ -1,7 +1,8 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ClaudeUsageCore
 
-final class UsageCoreTests: XCTestCase {
+struct UsageCoreTests {
     private var dailyDateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -11,24 +12,24 @@ final class UsageCoreTests: XCTestCase {
 
     // MARK: - Model Detection
 
-    func testDetectPreferredModelUsesOpusWhenAvailable() {
+    @Test func detectPreferredModelUsesOpusWhenAvailable() {
         let result = UsageModelDetector.detectPreferredModel(opusUtilization: 10, sonnetUtilization: 50)
-        XCTAssertEqual(result, "opus")
+        #expect(result == "opus")
     }
 
-    func testDetectPreferredModelUsesSonnetWhenOpusEmpty() {
+    @Test func detectPreferredModelUsesSonnetWhenOpusEmpty() {
         let result = UsageModelDetector.detectPreferredModel(opusUtilization: 0, sonnetUtilization: 7)
-        XCTAssertEqual(result, "sonnet")
+        #expect(result == "sonnet")
     }
 
-    func testDetectPreferredModelDefaultsToOpus() {
+    @Test func detectPreferredModelDefaultsToOpus() {
         let result = UsageModelDetector.detectPreferredModel(opusUtilization: nil, sonnetUtilization: nil)
-        XCTAssertEqual(result, "opus")
+        #expect(result == "opus")
     }
 
     // MARK: - History Recording
 
-    func testRecordAddsSampleAndDailySummary() {
+    @Test func recordAddsSampleAndDailySummary() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let initial = UsageHistoryFile(samples: [:], dailySummaries: [:])
 
@@ -40,13 +41,13 @@ final class UsageCoreTests: XCTestCase {
             dailyDateFormatter: dailyDateFormatter
         )
 
-        XCTAssertEqual(updated.samples["five_hour"]?.count, 1)
-        XCTAssertEqual(updated.samples["five_hour"]?.first?.utilization, 12)
-        XCTAssertEqual(updated.dailySummaries["five_hour"]?.count, 1)
-        XCTAssertEqual(updated.dailySummaries["five_hour"]?.first?.peakUtilization, 12)
+        #expect(updated.samples["five_hour"]?.count == 1)
+        #expect(updated.samples["five_hour"]?.first?.utilization == 12)
+        #expect(updated.dailySummaries["five_hour"]?.count == 1)
+        #expect(updated.dailySummaries["five_hour"]?.first?.peakUtilization == 12)
     }
 
-    func testRecordResetsHistoryAfterLargeDrop() {
+    @Test func recordResetsHistoryAfterLargeDrop() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let sampleA = UsageSample(date: now.addingTimeInterval(-120), utilization: 50)
         let sampleB = UsageSample(date: now.addingTimeInterval(-60), utilization: 55)
@@ -63,11 +64,11 @@ final class UsageCoreTests: XCTestCase {
             dailyDateFormatter: dailyDateFormatter
         )
 
-        XCTAssertEqual(updated.samples["five_hour"]?.count, 1)
-        XCTAssertEqual(updated.samples["five_hour"]?.first?.utilization, 40)
+        #expect(updated.samples["five_hour"]?.count == 1)
+        #expect(updated.samples["five_hour"]?.first?.utilization == 40)
     }
 
-    func testRecordTrimsToMaxSamples() {
+    @Test func recordTrimsToMaxSamples() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let samples = (0..<3).map { index in
             UsageSample(date: now.addingTimeInterval(TimeInterval(index) * -60), utilization: Double(index))
@@ -83,12 +84,12 @@ final class UsageCoreTests: XCTestCase {
             dailyDateFormatter: dailyDateFormatter
         )
 
-        XCTAssertEqual(updated.samples["weekly"]?.count, 3)
-        XCTAssertEqual(updated.samples["weekly"]?.first?.utilization, 1)
-        XCTAssertEqual(updated.samples["weekly"]?.last?.utilization, 5)
+        #expect(updated.samples["weekly"]?.count == 3)
+        #expect(updated.samples["weekly"]?.first?.utilization == 1)
+        #expect(updated.samples["weekly"]?.last?.utilization == 5)
     }
 
-    func testRecordUpdatesExistingDailyPeak() {
+    @Test func recordUpdatesExistingDailyPeak() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let day = dailyDateFormatter.string(from: now)
         let initial = UsageHistoryFile(
@@ -104,12 +105,12 @@ final class UsageCoreTests: XCTestCase {
             dailyDateFormatter: dailyDateFormatter
         )
 
-        XCTAssertEqual(updated.dailySummaries["weekly"]?.first?.peakUtilization, 45)
+        #expect(updated.dailySummaries["weekly"]?.first?.peakUtilization == 45)
     }
 
     // MARK: - Rate Calculation
 
-    func testCalculateRateReturnsPlaceholderWithoutHistory() {
+    @Test func calculateRateReturnsPlaceholderWithoutHistory() {
         let rate = UsageRateCalculator.calculateRate(
             from: [],
             currentUtilization: 20,
@@ -117,11 +118,11 @@ final class UsageCoreTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_700_000_000)
         )
 
-        XCTAssertNil(rate.perHour)
-        XCTAssertEqual(rate.descriptor, "--")
+        #expect(rate.perHour == nil)
+        #expect(rate.descriptor == "--")
     }
 
-    func testCalculateRateUsesLookbackBaselineForSessionRate() {
+    @Test func calculateRateUsesLookbackBaselineForSessionRate() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let old = UsageSample(date: now.addingTimeInterval(-4000), utilization: 10)
         let recent = UsageSample(date: now.addingTimeInterval(-600), utilization: 20)
@@ -132,11 +133,11 @@ final class UsageCoreTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(rate.perHour ?? 0, 60, accuracy: 0.1)
-        XCTAssertEqual(rate.descriptor, "extreme")
+        #expect(abs((rate.perHour ?? 0) - 60) <= 0.1)
+        #expect(rate.descriptor == "extreme")
     }
 
-    func testCalculateRateFallsBackToEarliestSampleWhenNoLookbackMatch() {
+    @Test func calculateRateFallsBackToEarliestSampleWhenNoLookbackMatch() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let sample = UsageSample(date: now.addingTimeInterval(-7200), utilization: 10)
         let rate = UsageRateCalculator.calculateRate(
@@ -146,11 +147,11 @@ final class UsageCoreTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(rate.perHour ?? 0, 12, accuracy: 0.1)
-        XCTAssertEqual(rate.descriptor, "light")
+        #expect(abs((rate.perHour ?? 0) - 12) <= 0.1)
+        #expect(rate.descriptor == "light")
     }
 
-    func testCalculateWeeklyRateUsesDailyDescriptors() {
+    @Test func calculateWeeklyRateUsesDailyDescriptors() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let baseline = UsageSample(date: now.addingTimeInterval(-24 * 3600), utilization: 0)
         let rate = UsageRateCalculator.calculateRate(
@@ -160,11 +161,11 @@ final class UsageCoreTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(rate.perDay ?? 0, 16, accuracy: 0.1)
-        XCTAssertEqual(rate.descriptor, "fast")
+        #expect(abs((rate.perDay ?? 0) - 16) <= 0.1)
+        #expect(rate.descriptor == "fast")
     }
 
-    func testCalculateRateHandlesResetWithNegativeDelta() {
+    @Test func calculateRateHandlesResetWithNegativeDelta() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let baseline = UsageSample(date: now.addingTimeInterval(-3600), utilization: 80)
         let rate = UsageRateCalculator.calculateRate(
@@ -174,8 +175,8 @@ final class UsageCoreTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(rate.perHour ?? 0, 20, accuracy: 0.1)
-        XCTAssertEqual(rate.descriptor, "steady")
+        #expect(abs((rate.perHour ?? 0) - 20) <= 0.1)
+        #expect(rate.descriptor == "steady")
     }
 
     // MARK: - Status Bar Display Mode
@@ -196,40 +197,34 @@ final class UsageCoreTests: XCTestCase {
         )
     }
 
-    func testRisingOverageTakesOverBelowFullUtilization() {
+    @Test func risingOverageTakesOverBelowFullUtilization() {
         let mode = selectMode(util: 70, priorUtil: 70, spent: 250, priorSpent: 100)
-        XCTAssertEqual(mode, .overage)
+        #expect(mode == .overage)
     }
 
-    func testRisingOverageWinsWhenUtilizationAlsoRises() {
+    @Test func risingOverageWinsWhenUtilizationAlsoRises() {
         let mode = selectMode(util: 72, priorUtil: 70, spent: 250, priorSpent: 100)
-        XCTAssertEqual(mode, .overage)
+        #expect(mode == .overage)
     }
 
-    func testRisingUtilizationReclaimsMenuBarFromOverage() {
+    @Test func risingUtilizationReclaimsMenuBarFromOverage() {
         let mode = selectMode(previous: .overage, util: 42, priorUtil: 40, spent: 250, priorSpent: 250)
-        XCTAssertEqual(mode, .percentage)
+        #expect(mode == .percentage)
     }
 
-    func testFlatUsageKeepsCurrentMode() {
-        XCTAssertEqual(
-            selectMode(previous: .overage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
-            .overage
-        )
-        XCTAssertEqual(
-            selectMode(previous: .percentage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250),
-            .percentage
-        )
+    @Test func flatUsageKeepsCurrentMode() {
+        #expect(selectMode(previous: .overage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250) == .overage)
+        #expect(selectMode(previous: .percentage, util: 40, priorUtil: 40, spent: 250, priorSpent: 250) == .percentage)
     }
 
-    func testMissingSpendFallsBackToPercentage() {
+    @Test func missingSpendFallsBackToPercentage() {
         let mode = selectMode(previous: .overage, util: 40, priorUtil: 40, spent: nil, priorSpent: 250)
-        XCTAssertEqual(mode, .percentage)
+        #expect(mode == .percentage)
     }
 
-    func testFirstFetchShowsPercentage() {
+    @Test func firstFetchShowsPercentage() {
         let mode = selectMode(util: 40, priorUtil: nil, spent: 250, priorSpent: nil)
-        XCTAssertEqual(mode, .percentage)
+        #expect(mode == .percentage)
     }
 
     // MARK: - Extra Usage Row Visibility
@@ -246,47 +241,47 @@ final class UsageCoreTests: XCTestCase {
         )
     }
 
-    func testExtraRowHiddenWhileBothWeeklyLimitsHaveRoom() {
-        XCTAssertFalse(shouldShowRow(scopedWeekly: 70, overallWeekly: 45))
+    @Test func extraRowHiddenWhileBothWeeklyLimitsHaveRoom() {
+        #expect(!shouldShowRow(scopedWeekly: 70, overallWeekly: 45))
     }
 
-    func testExtraRowShownWhenScopedWeeklyIsExhausted() {
-        XCTAssertTrue(shouldShowRow(scopedWeekly: 100, overallWeekly: 45))
+    @Test func extraRowShownWhenScopedWeeklyIsExhausted() {
+        #expect(shouldShowRow(scopedWeekly: 100, overallWeekly: 45))
     }
 
-    func testExtraRowShownWhenOverallWeeklyIsExhausted() {
-        XCTAssertTrue(shouldShowRow(scopedWeekly: 70, overallWeekly: 100))
+    @Test func extraRowShownWhenOverallWeeklyIsExhausted() {
+        #expect(shouldShowRow(scopedWeekly: 70, overallWeekly: 100))
     }
 
-    func testExtraRowStaysHiddenJustUnderEitherLimit() {
-        XCTAssertFalse(shouldShowRow(scopedWeekly: 99.9, overallWeekly: 99.9))
+    @Test func extraRowStaysHiddenJustUnderEitherLimit() {
+        #expect(!shouldShowRow(scopedWeekly: 99.9, overallWeekly: 99.9))
     }
 
-    func testExtraRowHiddenWithoutUtilizationData() {
-        XCTAssertFalse(shouldShowRow(scopedWeekly: nil, overallWeekly: nil))
+    @Test func extraRowHiddenWithoutUtilizationData() {
+        #expect(!shouldShowRow(scopedWeekly: nil, overallWeekly: nil))
     }
 
-    func testExtraRowShownOnOverallWeeklyWithoutScopedData() {
-        XCTAssertTrue(shouldShowRow(scopedWeekly: nil, overallWeekly: 100))
+    @Test func extraRowShownOnOverallWeeklyWithoutScopedData() {
+        #expect(shouldShowRow(scopedWeekly: nil, overallWeekly: 100))
     }
 
-    func testAlwaysShowOverridesEverything() {
-        XCTAssertTrue(shouldShowRow(alwaysShow: true, scopedWeekly: 0, overallWeekly: 0))
-        XCTAssertTrue(shouldShowRow(alwaysShow: true, scopedWeekly: nil, overallWeekly: nil))
+    @Test func alwaysShowOverridesEverything() {
+        #expect(shouldShowRow(alwaysShow: true, scopedWeekly: 0, overallWeekly: 0))
+        #expect(shouldShowRow(alwaysShow: true, scopedWeekly: nil, overallWeekly: nil))
     }
 
     // MARK: - Extra Usage Credits
 
-    func testFormatCreditsUsesReportedDecimalPlaces() {
-        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: 2), "$733.33")
-        XCTAssertEqual(ExtraUsageFormatter.formatCredits(500, decimalPlaces: 0), "$500")
+    @Test func formatCreditsUsesReportedDecimalPlaces() {
+        #expect(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: 2) == "$733.33")
+        #expect(ExtraUsageFormatter.formatCredits(500, decimalPlaces: 0) == "$500")
     }
 
-    func testFormatCreditsDefaultsToTwoDecimalPlaces() {
-        XCTAssertEqual(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: nil), "$733.33")
+    @Test func formatCreditsDefaultsToTwoDecimalPlaces() {
+        #expect(ExtraUsageFormatter.formatCredits(73333, decimalPlaces: nil) == "$733.33")
     }
 
-    func testFormatCreditsHandlesZero() {
-        XCTAssertEqual(ExtraUsageFormatter.formatCredits(0, decimalPlaces: 2), "$0.00")
+    @Test func formatCreditsHandlesZero() {
+        #expect(ExtraUsageFormatter.formatCredits(0, decimalPlaces: 2) == "$0.00")
     }
 }
