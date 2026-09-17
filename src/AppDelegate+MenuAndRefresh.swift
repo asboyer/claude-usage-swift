@@ -24,10 +24,12 @@ extension AppDelegate {
         menu.addItem(rateLimitItem)
         menu.addItem(updatedItem)
 
-        let graphItem = NSMenuItem(title: "Usage Graph", action: #selector(showUsageGraph), keyEquivalent: "g")
-        graphItem.target = self
-        graphItem.keyEquivalentModifierMask = []
-        menu.addItem(graphItem)
+        let breakdownItem = NSMenuItem(
+            title: "Usage Breakdown", action: #selector(showUsageBreakdown), keyEquivalent: "g"
+        )
+        breakdownItem.target = self
+        breakdownItem.keyEquivalentModifierMask = []
+        menu.addItem(breakdownItem)
 
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
         copyItem.target = self
@@ -529,19 +531,19 @@ extension AppDelegate {
         applyExtraUsageRowVisibility()
     }
 
-    @objc func showUsageGraph() {
-        if let existing = graphPanel {
+    @objc func showUsageBreakdown() {
+        if let existing = breakdownPanel {
             existing.close()
-            graphPanel = nil
+            breakdownPanel = nil
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 220),
-            styleMask: [.titled, .closable, .hudWindow, .utilityWindow],
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 600),
+            styleMask: [.titled, .closable, .resizable, .hudWindow, .utilityWindow],
             backing: .buffered,
             defer: false
         )
-        panel.title = "Claude Usage — Last 90 Days"
+        panel.title = "Usage Breakdown"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.level = .floating
@@ -550,14 +552,28 @@ extension AppDelegate {
         let webView = WKWebView(frame: panel.contentView!.bounds)
         webView.autoresizingMask = [.width, .height]
         webView.setValue(false, forKey: "drawsBackground")
+        webView.navigationDelegate = self
         panel.contentView?.addSubview(webView)
 
-        let html = generateHeatmapHTML()
-        webView.loadHTMLString(html, baseURL: nil)
+        // The heatmap renders immediately; reading every recent transcript takes long enough
+        // that doing it on the main thread would stall the panel, so the summary fills in after.
+        breakdownNavigation = nil
+        webView.loadHTMLString(generateUsageBreakdownHTML(breakdown: nil), baseURL: nil)
+        let windowHours = ClaudeCodeTranscripts.defaultWindowHours
+        DispatchQueue.global(qos: .userInitiated).async {
+            let requests = ClaudeCodeTranscripts.recentRequests(windowHours: windowHours)
+            let breakdown = UsageBreakdownBuilder.build(from: requests, windowHours: windowHours)
+            DispatchQueue.main.async { [weak self, weak panel, weak webView] in
+                guard let self, panel != nil, let webView else { return }
+                self.breakdownNavigation = webView.loadHTMLString(
+                    generateUsageBreakdownHTML(breakdown: breakdown), baseURL: nil
+                )
+            }
+        }
 
         panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
-        graphPanel = panel
+        breakdownPanel = panel
     }
 
     @objc func recordHotkey() {
@@ -1469,5 +1485,35 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         playAlarmBursts(soundName: selectedSoundName, checkMuted: { false }) { [weak self] in
             self?.alarmIsPlaying = false
         }
+    }
+}
+
+extension AppDelegate: WKNavigationDelegate {
+    /// How short and how tall the breakdown panel is allowed to get once it is sized to its content.
+    private static let breakdownMinimumHeight: CGFloat = 240
+    private static let breakdownScreenMargin: CGFloat = 80
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Only the finished summary is measured; sizing to the placeholder would resize twice.
+        guard navigation === breakdownNavigation, let panel = breakdownPanel else { return }
+        webView.evaluateJavaScript("document.body.scrollHeight") { [weak self, weak panel] result, _ in
+            guard let self, let panel, let measured = (result as? NSNumber)?.doubleValue else { return }
+            self.resizeBreakdownPanel(panel, toContentHeight: CGFloat(measured))
+        }
+    }
+
+    /// Fits the panel to the rendered page so no dead space is left under the heatmap, keeping the
+    /// top edge where it is rather than re-centring a panel the user may already have moved.
+    private func resizeBreakdownPanel(_ panel: NSPanel, toContentHeight height: CGFloat) {
+        let available = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? height
+        let capped = min(
+            max(height, Self.breakdownMinimumHeight),
+            max(available - Self.breakdownScreenMargin, Self.breakdownMinimumHeight)
+        )
+        let contentWidth = panel.contentView?.bounds.width ?? panel.frame.width
+        var frame = panel.frameRect(forContentRect: NSRect(x: 0, y: 0, width: contentWidth, height: capped))
+        guard abs(frame.height - panel.frame.height) > 1 else { return }
+        frame.origin = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - frame.height)
+        panel.setFrame(frame, display: true)
     }
 }

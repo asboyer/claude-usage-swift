@@ -21,8 +21,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var rateLimitItem: NSMenuItem!
     var isRateLimited = false
 
-    // Usage graph
-    var graphPanel: NSPanel?
+    // Usage breakdown
+    var breakdownPanel: NSPanel?
+    /// The load whose finished size the panel is sized to, so the placeholder load is ignored.
+    var breakdownNavigation: WKNavigation?
 
     // Which keys are pinned to the main menu
     var menuReady = false
