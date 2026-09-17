@@ -21,8 +21,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var rateLimitItem: NSMenuItem!
     var isRateLimited = false
 
-    // Usage graph
-    var graphPanel: NSPanel?
+    // Usage breakdown
+    var breakdownPanel: NSPanel?
 
     // Which keys are pinned to the main menu
     var menuReady = false

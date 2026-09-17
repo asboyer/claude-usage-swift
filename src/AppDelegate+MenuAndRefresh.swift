@@ -24,10 +24,12 @@ extension AppDelegate {
         menu.addItem(rateLimitItem)
         menu.addItem(updatedItem)
 
-        let graphItem = NSMenuItem(title: "Usage Graph", action: #selector(showUsageGraph), keyEquivalent: "g")
-        graphItem.target = self
-        graphItem.keyEquivalentModifierMask = []
-        menu.addItem(graphItem)
+        let breakdownItem = NSMenuItem(
+            title: "Usage Breakdown", action: #selector(showUsageBreakdown), keyEquivalent: "g"
+        )
+        breakdownItem.target = self
+        breakdownItem.keyEquivalentModifierMask = []
+        menu.addItem(breakdownItem)
 
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
         copyItem.target = self
@@ -529,19 +531,19 @@ extension AppDelegate {
         applyExtraUsageRowVisibility()
     }
 
-    @objc func showUsageGraph() {
-        if let existing = graphPanel {
+    @objc func showUsageBreakdown() {
+        if let existing = breakdownPanel {
             existing.close()
-            graphPanel = nil
+            breakdownPanel = nil
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 220),
-            styleMask: [.titled, .closable, .hudWindow, .utilityWindow],
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 700),
+            styleMask: [.titled, .closable, .resizable, .hudWindow, .utilityWindow],
             backing: .buffered,
             defer: false
         )
-        panel.title = "Claude Usage — Last 90 Days"
+        panel.title = "Usage Breakdown"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.level = .floating
@@ -552,12 +554,22 @@ extension AppDelegate {
         webView.setValue(false, forKey: "drawsBackground")
         panel.contentView?.addSubview(webView)
 
-        let html = generateHeatmapHTML()
-        webView.loadHTMLString(html, baseURL: nil)
+        // The heatmap renders immediately; reading every recent transcript takes long enough
+        // that doing it on the main thread would stall the panel, so the summary fills in after.
+        webView.loadHTMLString(generateUsageBreakdownHTML(breakdown: nil), baseURL: nil)
+        let windowHours = ClaudeCodeTranscripts.defaultWindowHours
+        DispatchQueue.global(qos: .userInitiated).async {
+            let requests = ClaudeCodeTranscripts.recentRequests(windowHours: windowHours)
+            let breakdown = UsageBreakdownBuilder.build(from: requests, windowHours: windowHours)
+            DispatchQueue.main.async { [weak panel, weak webView] in
+                guard panel != nil, let webView else { return }
+                webView.loadHTMLString(generateUsageBreakdownHTML(breakdown: breakdown), baseURL: nil)
+            }
+        }
 
         panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
-        graphPanel = panel
+        breakdownPanel = panel
     }
 
     @objc func recordHotkey() {

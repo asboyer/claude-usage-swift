@@ -18,10 +18,10 @@ A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex,
 | **Surfaces overage spend** | When extra usage credits tick up, the menu bar shows dollars spent instead of a percentage. |
 | **Desktop cookies or OAuth** | Choose how to fetch data in Settings — Desktop cookies (recommended) avoid OAuth rate limits; OAuth is the classic option. |
 | **Global hotkey** | Press `Cmd+Shift+X` from anywhere to open the menu (customizable in Settings). |
-| **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `g` usage graph, `x` close. |
+| **In-menu shortcuts** | With the menu open: `c` copy usage, `r` refresh, `g` usage breakdown, `x` close. |
 | **Color-coded severity** | Optional projection-based green → yellow → orange → red that answers "will I run out before the window resets?" |
 | **Rate Insight** | Optional per-category usage rate (%/hr or %/day) with descriptors: *light*, *steady*, *fast*, *heavy*, *extreme*. |
-| **Usage Graph** | GitHub-contribution-style 90-day heatmap of your daily peak usage, rendered in a floating panel. Press `g` to open. |
+| **Usage Breakdown** | A floating panel with two parts: a summary of what drove your limits usage over the last 24 hours, above a GitHub-contribution-style 90-day heatmap of your daily peak usage. Press `g` to open. |
 | **5-hour & weekly limits** | Utilization plus countdown to reset for each window. |
 | **Per-model weekly limit** | Shows the weekly limit scoped to the model you're using (e.g. Fable), labeled with the name the API reports. |
 | **Auto-refresh** | Poll every 1, 5, 30, or 60 minutes. |
@@ -202,6 +202,30 @@ and the app behaves exactly as before.
 > a provider invoice. Expect it to land close to, but not exactly on, what Anthropic or Fireworks
 > eventually bill. For the authoritative number, use the provider's billing API.
 
+### Usage Breakdown summary
+
+The top half of the Usage Breakdown panel answers "what's contributing to your limits usage?" from the Claude Code
+session transcripts this machine writes under `~/.claude/projects`. Nothing is uploaded and no other device or
+claude.ai activity is visible, so the figures are local and approximate.
+
+The scan reads every assistant request logged in the last 24 hours, including the ones subagents make in
+`<session>/subagents/`, and weights each request by its model's published per-token rates so an Opus token is not
+counted like a Haiku one. Plan limits are not billed in dollars, so this weighting is only a proxy for comparing
+requests against each other.
+
+Four characteristics are then measured independently, which is why their shares do not add up to 100%:
+
+| Signal | What it counts |
+| --- | --- |
+| Subagent-heavy sessions | Sessions where subagents ran at least half the session's weighted cost |
+| >150k context | Requests whose prompt, cached or not, exceeded 150,000 tokens |
+| Sessions active 8+ hours | Sessions spanning eight hours or more between their first and last request |
+| Top subagent group | The largest single group in the Subagents table |
+
+The two tables below the signals split the same total: **Skills** covers main-thread requests attributed to a skill,
+and **Subagents** covers subagent requests, grouped under the skill that spawned them when there is one and the agent
+type otherwise.
+
 ### Which provider the menu bar shows
 
 The menu bar tracks whichever provider most recently consumed usage:
@@ -262,7 +286,7 @@ Usage history is stored persistently at:
 This location is outside the app bundle, so your data survives app updates, deletions, and reinstalls. The file contains:
 
 - **Rolling samples** — recent utilization readings per category (used for rate calculations)
-- **Daily summaries** — one peak-utilization entry per day per category (used for the usage graph and long-term tracking)
+- **Daily summaries** — one peak-utilization entry per day per category (used for the usage heatmap and long-term tracking)
 
 Codex history is stored in the same file under the `codex_five_hour` and `codex_weekly` categories, and
 Cursor under `cursor_models` and `cursor_other_models`.
