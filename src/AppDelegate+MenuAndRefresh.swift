@@ -560,10 +560,12 @@ extension AppDelegate {
         breakdownNavigation = nil
         webView.loadHTMLString(generateUsageBreakdownHTML(breakdown: nil), baseURL: nil)
         let windowHours = ClaudeCodeTranscripts.defaultWindowHours
-        DispatchQueue.global(qos: .userInitiated).async {
+        // The capture list belongs on the scan closure, not the hop back: it is the scan that
+        // outlives a panel the user closes, and a strong capture here would pin the whole web view.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, weak panel, weak webView] in
             let requests = ClaudeCodeTranscripts.recentRequests(windowHours: windowHours)
             let breakdown = UsageBreakdownBuilder.build(from: requests, windowHours: windowHours)
-            DispatchQueue.main.async { [weak self, weak panel, weak webView] in
+            DispatchQueue.main.async {
                 guard let self, panel != nil, let webView else { return }
                 self.breakdownNavigation = webView.loadHTMLString(
                     generateUsageBreakdownHTML(breakdown: breakdown), baseURL: nil
