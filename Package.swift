@@ -29,7 +29,8 @@ let package = Package(
             ],
             sources: [
                 "UsageCore.swift", "CodexUsageCore.swift", "OpencodeUsageCore.swift",
-                "KeychainCredentials.swift",
+                "KeychainCredentials.swift", "UsageBreakdownCore.swift",
+                "ClaudeCodeTranscripts.swift",
             ]
         ),
         .testTarget(

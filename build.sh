@@ -19,7 +19,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/KeychainCredentials.swift \
     src/api/UsageAPIModels.swift \
     src/history/UsageHistoryStore.swift \
-    src/graph/UsageHeatmap.swift \
+    src/graph/UsageBreakdownPage.swift \
     src/api/ClaudeDesktopUsageAPI.swift \
     src/api/OAuthUsageAPI.swift \
     src/api/CodexUsageAPI.swift \
@@ -30,6 +30,8 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/AppDelegate+MenuAndRefresh.swift \
     src/ClaudeUsage.swift \
     src/UsageCore.swift \
+    src/UsageBreakdownCore.swift \
+    src/ClaudeCodeTranscripts.swift \
     src/CodexUsageCore.swift \
     src/OpencodeUsageCore.swift \
     -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
