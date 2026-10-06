@@ -93,9 +93,11 @@ func inspectClone(at clone: String, updateBranch: String, builtHash: String, lat
     }
     let upstreamBranch = runGit(["config", "--get", "branch.\(updateBranch).merge"], in: clone)
         .flatMap(UpdateCore.branchName(fromMergeRef:))
-    let unpushed = runGit(
-        ["rev-list", "--count", "refs/heads/\(updateBranch)@{upstream}..refs/heads/\(updateBranch)"], in: clone
-    ).flatMap { Int($0) }
+    let upstreamRef = "refs/heads/\(updateBranch)@{upstream}"
+    let unpushed = runGit(["rev-list", "--count", "\(upstreamRef)..refs/heads/\(updateBranch)"], in: clone)
+        .flatMap { Int($0) }
+    let notOnUpdateBranch = runGit(["rev-list", "--count", "\(upstreamRef)..HEAD"], in: clone)
+        .flatMap { Int($0) }
     // Exits 0 only when latestHash is an ancestor of (or equal to) builtHash. An unknown commit
     // exits non-zero, which falls back to treating the latest commit as new.
     let buildIncludesLatest =
@@ -108,17 +110,19 @@ func inspectClone(at clone: String, updateBranch: String, builtHash: String, lat
         upstreamRemoteURL: remoteURL,
         upstreamBranch: upstreamBranch,
         unpushedCommitCount: unpushed,
+        commitsNotOnUpdateBranch: notOnUpdateBranch,
         buildIncludesLatest: buildIncludesLatest
     )
 }
 
 // MARK: - Installing
 
-/// $1 is the clone, $2 the update branch. Exits non-zero if any step failed, including switching
-/// back, so the app reports it.
+/// $1 is the clone, $2 the update branch. Returns to the branch, or on a detached HEAD the commit,
+/// that was checked out. Exits non-zero if any step failed, including switching back, so the app
+/// reports it.
 private let installScript = #"""
     cd "$1" || exit 1
-    original=$(git symbolic-ref --short HEAD) || exit 1
+    original=$(git symbolic-ref --short -q HEAD || git rev-parse HEAD) || exit 1
     if [ "$original" != "$2" ]; then
         echo "Switching from $original to $2"
         git checkout --quiet "$2" || exit 1

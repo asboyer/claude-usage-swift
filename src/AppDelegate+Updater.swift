@@ -94,22 +94,28 @@ extension AppDelegate {
                     clone: clone, clonePath: source.clonePath, branch: source.updateBranch),
                 buttons: ["Install", "Later"])
             if install == .alertFirstButtonReturn { installUpdate(confirmed: true) }
-        case .cloneHasLocalChanges:
+        case .blocked(let reason):
+            explainBlocked(reason, source: source)
+        }
+    }
+
+    /// Finder is offered only for uncommitted changes, the one case the user fixes in the clone.
+    private func explainBlocked(_ reason: CloneBlockReason, source: BuildSource) {
+        let message = UpdateCore.blockedMessage(
+            reason: reason, clonePath: source.clonePath, branch: source.updateBranch)
+        if reason == .uncommittedChanges {
             let reveal = showUpdateAlert(
-                title: "An update is available",
-                message: UpdateCore.blockedMessage(
-                    reason: UpdateCore.blockReason(clone: clone, branch: source.updateBranch)
-                        ?? .notTrackingUpstream,
-                    clonePath: source.clonePath, branch: source.updateBranch),
-                buttons: ["Show in Finder", "OK"])
+                title: "An update is available", message: message, buttons: ["Show in Finder", "OK"])
             if reveal == .alertFirstButtonReturn { revealClone() }
+        } else {
+            showUpdateAlert(title: "An update is available", message: message)
         }
     }
 
     @objc func updateItemClicked() {
         switch updateMenuState {
         case .available:
-            // Installs, or opens the clone in Finder if it can't be pulled.
+            // Installs, or explains why it can't.
             installUpdate()
         case .failed:
             NSWorkspace.shared.open(updateLogURL)
@@ -136,9 +142,15 @@ extension AppDelegate {
         switch status {
         case .upToDate:
             updateMenuState = .hidden
-        case .cloneHasLocalChanges:
-            updateMenuState = .available(.cloneHasLocalChanges)
-            revealClone()
+        case .blocked(let reason):
+            updateMenuState = .available(status)
+            refreshUpdateItem()
+            // The row already says the clone has local changes, so go straight to it.
+            if reason == .uncommittedChanges {
+                revealClone()
+            } else {
+                explainBlocked(reason, source: source)
+            }
         case .installable:
             // Building another branch leaves that branch's changes out of the app, so say so first.
             if !confirmed && clone.branch != source.updateBranch {
