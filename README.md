@@ -282,6 +282,7 @@ All settings are accessible from the **Settings** submenu:
 - **Track Codex Usage** — fetch and display Codex usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
 - **Codex Credit Price** — dollars per Codex credit used to price the overage estimate ($0.04 by default; $0.03, $0.05, or Custom…)
 - **Codex Extra Usage Window** — the period the Codex overage estimate covers: Month (default), Week, or Day
+- **Show Codex Credits** — list the credit count beside each Codex overage dollar figure (off by default, so the row reads like Claude's Extra spend)
 - **Track Cursor Usage** — fetch and display Cursor usage (on by default; turning it off hides the Cursor section)
 - **Track Opencode** — read and display opencode spend (on by default; turning it off hides the Opencode section)
 - **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly, Extra — Cursor: Cursor Models, Other Models)

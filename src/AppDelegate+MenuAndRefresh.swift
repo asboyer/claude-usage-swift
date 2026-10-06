@@ -134,6 +134,13 @@ extension AppDelegate {
         creditPriceItem.submenu = creditPriceMenu
         settingsMenu.addItem(creditPriceItem)
 
+        showCodexCreditsItem = NSMenuItem(
+            title: "Show Codex Credits", action: #selector(toggleShowCodexCredits), keyEquivalent: ""
+        )
+        showCodexCreditsItem.target = self
+        showCodexCreditsItem.state = showCodexCredits ? .on : .off
+        settingsMenu.addItem(showCodexCreditsItem)
+
         // Codex Extra Usage Window submenu — how far back the Codex Extra row counts
         let overagePeriodMenu = NSMenu()
         codexOveragePeriodItems = CodexOveragePeriod.allCases.map { period in
@@ -1404,10 +1411,11 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
         let label = categoryLabel(for: codexExtraKey)
         let dollars = CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
-        let credits = CodexOverageCore.formatCredits(overage.credits)
         let suffix = overage.period.rowSuffix
-        item.title = "\(label): ~\(dollars) (\(credits) \(suffix))"
-        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", "\(credits) \(suffix)")
+        // Credits are OpenAI's billing unit; dollars alone read like Claude's Extra row.
+        let detail = showCodexCredits ? "\(CodexOverageCore.formatCredits(overage.credits)) \(suffix)" : suffix
+        item.title = "\(label): ~\(dollars) (\(detail))"
+        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", detail)
         item.submenu = codexOverageBreakdownMenu(overage)
         item.isHidden = false
     }
@@ -1425,11 +1433,11 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         for model in overage.models {
             let dollars = CodexOverageCore.formatDollars(model.dollars(pricePerCredit: codexCreditPrice))
             let credits = CodexOverageCore.formatCredits(model.credits)
-            let row = NSMenuItem(
-                title: "\(model.model): ~\(dollars) (\(credits))", action: #selector(noop), keyEquivalent: ""
-            )
+            let title = showCodexCredits ? "\(model.model): ~\(dollars) (\(credits))" : "\(model.model): ~\(dollars)"
+            let row = NSMenuItem(title: title, action: #selector(noop), keyEquivalent: "")
             row.target = self
-            row.attributedTitle = tabbedMenuItemString(model.model, "~\(dollars)  \(credits)")
+            row.attributedTitle = tabbedMenuItemString(
+                model.model, showCodexCredits ? "~\(dollars)  \(credits)" : "~\(dollars)")
             submenu.addItem(row)
             rowWidths.append(row.attributedTitle?.size().width ?? 0)
         }
@@ -1482,6 +1490,10 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         codexCreditPriceCustomItem?.state = matchedPreset ? .off : .on
         codexCreditPriceCustomItem?.title =
             matchedPreset ? "Custom…" : "Custom (\(CodexOverageCore.formatPrice(codexCreditPrice)))…"
+    }
+
+    @objc func toggleShowCodexCredits() {
+        showCodexCredits = !showCodexCredits
     }
 
     func updateCodexOveragePeriodMenu() {

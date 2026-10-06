@@ -129,6 +129,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
     var codexCreditPriceItems: [NSMenuItem] = []
+
+    // Whether the Codex Extra row lists credits beside its dollar estimate.
+    var showCodexCredits: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showCodexCredits, forKey: "showCodexCredits")
+            showCodexCreditsItem?.state = showCodexCredits ? .on : .off
+            updateCodexExtraItem()
+        }
+    }
+    var showCodexCreditsItem: NSMenuItem!
     var codexCreditPriceCustomItem: NSMenuItem!
 
     // How far back the Codex Extra row counts overage.
@@ -295,6 +305,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let savedPrice = ud.object(forKey: "codexCreditPrice") as? Double, savedPrice > 0 {
             codexCreditPrice = savedPrice
+        }
+        if ud.object(forKey: "showCodexCredits") != nil {
+            showCodexCredits = ud.bool(forKey: "showCodexCredits")
         }
         if let savedPeriod = ud.string(forKey: "codexOveragePeriod").flatMap(CodexOveragePeriod.init(rawValue:)) {
             codexOveragePeriod = savedPeriod
