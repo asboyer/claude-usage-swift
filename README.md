@@ -23,6 +23,7 @@ A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex,
 | **Color-coded severity** | Optional projection-based green → yellow → orange → red that answers "will I run out before the window resets?" |
 | **Rate Insight** | Optional per-category usage rate (%/hr or %/day) with descriptors: *light*, *steady*, *fast*, *heavy*, *extreme*. |
 | **Usage Breakdown** | A floating panel with two parts: a summary of what drove your limits usage over the last 24 hours, above a GitHub-contribution-style 90-day heatmap of your daily peak usage. Press `g` to open. |
+| **Spend History** | A floating panel of your Claude, Codex and opencode spend, one week or month at a time: what was billed past your plans (Claude Extra usage, Codex overage, opencode), with a chart of earlier periods and an optional per-model split. Press `h` to open. |
 | **5-hour & weekly limits** | Utilization plus countdown to reset for each window. |
 | **Per-model weekly limit** | Shows the weekly limit scoped to the model you're using (e.g. Fable), labeled with the name the API reports. |
 | **Auto-refresh** | Poll every 1, 5, 30, or 60 minutes. |
@@ -247,6 +248,31 @@ The two tables below the signals split the same total: **Skills** covers main-th
 and **Subagents** covers subagent requests, grouped under the skill that spawned them when there is one and the agent
 type otherwise.
 
+### Spend History
+
+The Spend panel (`h`) opens on one week or month: its total, the change from the period before, the average of
+earlier periods, the split between providers, and a chart of every period below, providers stacked.
+Step through periods with the arrows (or ← →) or by clicking a bar in the chart. Hover the ⓘ beside the title for
+where each number comes from.
+
+- **All / Claude / Codex / Opencode** — every provider, or just one. Only providers with recorded spend are listed.
+- **Week / Month** — the period length.
+- **Models** (beside "By provider") — splits each provider by model, with each model's share of the tokens behind
+  the spend.
+
+Codex overage is the same estimate as the Codex Extra row, rebuilt from every session on this Mac. Claude reports
+only the running monthly Extra total, so the app records each rise in it from the first time it runs and splits the
+rise across the Claude Code requests sent in that window by their cost at API rates (how Extra usage is billed);
+spend from before the first reading shows as "Before tracking", and spend billed while Claude Code on this Mac sent
+no requests (claude.ai, other devices) as "Unmatched". The total starts over at the beginning of each UTC month.
+Opencode spend is the cost opencode records for
+each pay-per-token request; subscription-billed turns cost nothing there and are left out.
+
+The app keeps its own daily ledger, because Claude Code deletes transcripts after 30 days. The first scan reads every
+local Codex session; after that, opening the panel or the 6-hourly background scan reads only the Codex files
+touched since the last scan, plus the Claude Code transcripts behind any Claude Extra rise not yet split by model.
+The panel shows one snapshot once the scan finishes.
+
 ### Which provider the menu bar shows
 
 The menu bar tracks whichever provider most recently consumed usage:
@@ -314,6 +340,8 @@ This location is outside the app bundle, so your data survives app updates, dele
 
 Codex history is stored in the same file under the `codex_five_hour` and `codex_weekly` categories, and
 Cursor under `cursor_models` and `cursor_other_models`.
+
+Spend History keeps a daily per-model ledger in `extra_spend.json` in the same folder.
 
 On first launch, any existing usage data from the app's previous UserDefaults storage is automatically migrated to this file.
 

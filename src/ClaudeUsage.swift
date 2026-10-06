@@ -25,6 +25,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var breakdownPanel: NSPanel?
     /// The load whose finished size the panel is sized to, so the placeholder load is ignored.
     var breakdownNavigation: WKNavigation?
+    var spendHistoryPanel: NSPanel?
+    var spendLedgerScanInFlight = false
 
     // Which keys are pinned to the main menu
     var menuReady = false

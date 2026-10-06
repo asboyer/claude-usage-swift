@@ -20,6 +20,8 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/api/UsageAPIModels.swift \
     src/history/UsageHistoryStore.swift \
     src/graph/UsageBreakdownPage.swift \
+    src/graph/SpendHistoryPage.swift \
+    src/history/SpendHistoryStore.swift \
     src/api/ClaudeDesktopUsageAPI.swift \
     src/api/OAuthUsageAPI.swift \
     src/api/CodexUsageAPI.swift \
@@ -35,6 +37,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/ClaudeCodeTranscripts.swift \
     src/CodexUsageCore.swift \
     src/CodexOverageCore.swift \
+    src/SpendHistoryCore.swift \
     src/OpencodeUsageCore.swift \
     src/UpdateCore.swift \
     src/api/GitHubUpdateAPI.swift \

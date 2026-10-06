@@ -50,6 +50,11 @@ struct CodexModelRequest: Equatable {
     /// Includes reasoning tokens, matching how Codex reports it.
     let outputTokens: Int
 
+    /// Falls back to time and size for records written before Codex logged a response ID.
+    var identity: String {
+        return responseID ?? "\(timestamp.timeIntervalSince1970)|\(inputTokens)"
+    }
+
     var totalTokens: Int {
         return inputTokens + outputTokens
     }
@@ -65,13 +70,13 @@ struct CodexModelRequest: Equatable {
     }
 }
 
-struct CodexLimitWindow: Equatable {
+struct CodexLimitWindow: Codable, Equatable {
     let usedPercent: Double
     let resetsAt: Date?
 }
 
 /// The account's 5-hour and weekly readings as Codex logged them after a response.
-struct CodexLimitReading: Equatable {
+struct CodexLimitReading: Codable, Equatable {
     let timestamp: Date
     let windows: [CodexLimitWindow]
 
@@ -248,17 +253,8 @@ enum CodexOverageCore {
         period: CodexOveragePeriod = .defaultPeriod
     ) -> CodexOverageEstimate {
         var estimate = CodexOverageEstimate(periodStart: start, periodEnd: end, period: period)
-        let timeline = readings.sorted { $0.timestamp < $1.timestamp }
         var byModel: [String: CodexModelOverage] = [:]
-        var seen = Set<String>()
-
-        for request in requests where request.timestamp >= start {
-            guard
-                let reading = latestReading(before: request.timestamp, in: timeline),
-                reading.isExhausted(at: request.timestamp)
-            else { continue }
-            let identity = request.responseID ?? "\(request.timestamp.timeIntervalSince1970)|\(request.inputTokens)"
-            guard seen.insert(identity).inserted else { continue }
+        for request in overageRequests(requests: requests, readings: readings, since: start) {
             guard let credits = request.credits, let model = request.model else {
                 estimate.unpricedRequests += 1
                 continue
@@ -275,6 +271,23 @@ enum CodexOverageCore {
             return first.model < second.model
         }
         return estimate
+    }
+
+    /// The requests sent since `start` while a limit was already exhausted, priced or not, each
+    /// counted once even if a resumed session replayed it into another file.
+    static func overageRequests(
+        requests: [CodexModelRequest], readings: [CodexLimitReading], since start: Date
+    ) -> [CodexModelRequest] {
+        let timeline = readings.sorted { $0.timestamp < $1.timestamp }
+        var seen = Set<String>()
+        return requests.filter { request in
+            guard
+                request.timestamp >= start,
+                let reading = latestReading(before: request.timestamp, in: timeline),
+                reading.isExhausted(at: request.timestamp)
+            else { return false }
+            return seen.insert(request.identity).inserted
+        }
     }
 
     /// Binary search over readings sorted by time, for the last one strictly before `date`.
