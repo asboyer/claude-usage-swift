@@ -1395,7 +1395,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         if let overage = codexOverage, overage.credits > 0,
             codexStatusDisplayMode == .overage || window.usedPercent >= 100
         {
-            return "~" + CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
+            return CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
         }
         return statusText(percent: window.usedPercent, resetsAt: window.resetsAt)
     }
@@ -1414,8 +1414,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         let suffix = overage.period.rowSuffix
         // Credits are OpenAI's billing unit; dollars alone read like Claude's Extra row.
         let detail = showCodexCredits ? "\(CodexOverageCore.formatCredits(overage.credits)) \(suffix)" : suffix
-        item.title = "\(label): ~\(dollars) (\(detail))"
-        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", detail)
+        item.title = "\(label): \(dollars) (\(detail))"
+        item.attributedTitle = tabbedMenuItemString("\(label): \(dollars)", detail)
         item.submenu = codexOverageBreakdownMenu(overage)
         item.isHidden = false
     }
@@ -1433,11 +1433,11 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         for model in overage.models {
             let dollars = CodexOverageCore.formatDollars(model.dollars(pricePerCredit: codexCreditPrice))
             let credits = CodexOverageCore.formatCredits(model.credits)
-            let title = showCodexCredits ? "\(model.model): ~\(dollars) (\(credits))" : "\(model.model): ~\(dollars)"
+            let title = showCodexCredits ? "\(model.model): \(dollars) (\(credits))" : "\(model.model): \(dollars)"
             let row = NSMenuItem(title: title, action: #selector(noop), keyEquivalent: "")
             row.target = self
             row.attributedTitle = tabbedMenuItemString(
-                model.model, showCodexCredits ? "~\(dollars)  \(credits)" : "~\(dollars)")
+                model.model, showCodexCredits ? "\(dollars)  \(credits)" : "\(dollars)")
             submenu.addItem(row)
             rowWidths.append(row.attributedTitle?.size().width ?? 0)
         }
