@@ -50,6 +50,10 @@ struct CodexModelRequest: Equatable {
     /// Includes reasoning tokens, matching how Codex reports it.
     let outputTokens: Int
 
+    var totalTokens: Int {
+        return inputTokens + outputTokens
+    }
+
     var credits: Double? {
         guard let rates = CodexCreditRateCard.rates(for: model) else { return nil }
         let uncachedInput = max(inputTokens - cachedInputTokens, 0)
@@ -150,6 +154,7 @@ struct CodexModelOverage: Equatable {
     let model: String
     var credits: Double
     var requests: Int
+    var tokens = 0
 
     func dollars(pricePerCredit: Double) -> Double {
         return credits * pricePerCredit
@@ -209,11 +214,18 @@ struct CodexOverageEstimate: Equatable {
     var overageRequests = 0
     /// Requests sent at the limit on a model the rate card does not list, left out of `credits`.
     var unpricedRequests = 0
+    /// Tokens across the priced requests in `credits`.
+    var tokens = 0
     /// Priced spend per model, most credits first.
     var models: [CodexModelOverage] = []
 
     func dollars(pricePerCredit: Double) -> Double {
         return credits * pricePerCredit
+    }
+
+    /// The model's share of the tokens behind the estimate, from 0 to 1.
+    func tokenShare(of model: CodexModelOverage) -> Double {
+        return tokens > 0 ? Double(model.tokens) / Double(tokens) : 0
     }
 }
 
@@ -253,8 +265,10 @@ enum CodexOverageCore {
             }
             estimate.credits += credits
             estimate.overageRequests += 1
+            estimate.tokens += request.totalTokens
             byModel[model, default: CodexModelOverage(model: model, credits: 0, requests: 0)].credits += credits
             byModel[model]?.requests += 1
+            byModel[model]?.tokens += request.totalTokens
         }
         estimate.models = byModel.values.sorted { first, second in
             if first.credits != second.credits { return first.credits > second.credits }
@@ -328,6 +342,12 @@ enum CodexOverageCore {
         formatter.numberStyle = .currency
         formatter.currencySymbol = "$"
         return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+
+    /// Whole percent, with "<1%" so a small but real share does not read as none.
+    static func formatShare(_ share: Double) -> String {
+        if share > 0 && share < 0.005 { return "<1%" }
+        return String(format: "%.0f%%", share * 100)
     }
 
     static func formatCredits(_ credits: Double) -> String {

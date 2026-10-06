@@ -219,11 +219,31 @@ struct CodexOverageCoreTests {
         let estimate = CodexOverageCore.estimate(requests: requests, readings: readings, since: start)
         #expect(
             estimate.models == [
-                CodexModelOverage(model: "gpt-6-astra", credits: 250, requests: 1),
-                CodexModelOverage(model: "gpt-6.1-sol", credits: 100, requests: 2),
+                CodexModelOverage(model: "gpt-6-astra", credits: 250, requests: 1, tokens: 1_000_000),
+                CodexModelOverage(model: "gpt-6.1-sol", credits: 100, requests: 2, tokens: 2_000_000),
             ])
         #expect(estimate.models.map(\.credits).reduce(0, +) == estimate.credits)
         #expect(estimate.unpricedRequests == 1)
+    }
+
+    @Test func tokenShareSplitsPricedTokensByModel() {
+        let readings = [reading(offset: 0, usedPercent: 100)]
+        let requests = [
+            request("r1", model: "gpt-6-astra", input: 200_000, output: 100_000),
+            request("r2", model: "gpt-6.1-sol", input: 600_000, output: 100_000),
+            request("r3", model: "codex-auto-review", input: 5_000_000),
+        ]
+        let estimate = CodexOverageCore.estimate(requests: requests, readings: readings, since: start)
+        // Unpriced tokens stay out, so the shares cover only what the dollars cover.
+        #expect(estimate.tokens == 1_000_000)
+        #expect(estimate.models.map { estimate.tokenShare(of: $0) } == [0.3, 0.7])
+    }
+
+    @Test func formatShareRoundsToWholePercentAndKeepsTinySharesVisible() {
+        #expect(CodexOverageCore.formatShare(0.3) == "30%")
+        #expect(CodexOverageCore.formatShare(0.996) == "100%")
+        #expect(CodexOverageCore.formatShare(0.001) == "<1%")
+        #expect(CodexOverageCore.formatShare(0) == "0%")
     }
 
     @Test func formatPeriodSpansTheWeeklyWindowInLocalTime() {
