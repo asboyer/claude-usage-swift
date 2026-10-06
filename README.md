@@ -112,8 +112,10 @@ If you built the app from a clone, it updates itself. At launch and every 6 hour
 
 When `master` has a newer commit, the menu shows one of:
 
-- **Update available — click to install**: your clone is on `master`, tracks this repo, and has no uncommitted or unpushed changes. Clicking runs `git pull --ff-only && ./update.sh` in the clone, which rebuilds, quits, replaces, and relaunches the app.
-- **Update available (clone has local changes)**: your clone is on another branch, has local changes, or tracks a fork. Clicking opens the clone in Finder and changes nothing; update it yourself, then run `./update.sh`.
+- **Update available — click to install**: your clone has no uncommitted changes, and its local `master` tracks this repo with no unpushed commits. Clicking runs `git pull --ff-only && ./update.sh` on `master`, which rebuilds, quits, replaces, and relaunches the app.
+  - If the clone is on another branch, the app switches it to `master` first and switches it back afterwards, whether or not the update worked. It asks before doing this. The new app is built from `master`, so it won't include commits that are only on your branch; the dialog says how many there are.
+- **Update available (clone has local changes)**: your clone has uncommitted changes, so the app can't switch to `master` and back without touching them. Clicking opens the clone in Finder and changes nothing. Commit or stash your changes, then check again.
+- **Update available (can't install automatically)**: your local `master` has unpushed commits, is missing, or tracks a fork. Clicking explains which; update the clone yourself, then run `./update.sh`.
 
 The install's output goes to `~/Library/Application Support/ClaudeUsage/update.log`. If it fails, the old app keeps running and the menu shows **Update failed — see log**.
 

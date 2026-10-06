@@ -35,7 +35,9 @@ extension AppDelegate {
         fetchLatestCommitHash(branch: source.updateBranch) { [weak self] latest in
             // Runs on URLSession's queue, so the git calls stay off the main thread.
             let clone = latest.flatMap {
-                inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: $0)
+                inspectClone(
+                    at: source.clonePath, updateBranch: source.updateBranch, builtHash: source.commitHash,
+                    latestHash: $0)
             }
             DispatchQueue.main.async {
                 self?.applyUpdateCheck(latest: latest, clone: clone, userInitiated: userInitiated)
@@ -61,7 +63,7 @@ extension AppDelegate {
             if userInitiated {
                 showUpdateAlert(
                     title: "Can't find the clone",
-                    message: "This app was built from \(source.clonePath), which is no longer a git clone.")
+                    message: "This app was built from a clone that's gone:\n\(source.clonePath)")
             }
             return
         }
@@ -82,32 +84,35 @@ extension AppDelegate {
         switch status {
         case .upToDate:
             showUpdateAlert(
-                title: "Claude Usage is up to date",
-                message: "Built from \(source.commitHash.prefix(7)), which includes the latest commit on "
-                    + "\(source.updateBranch).")
+                title: "You're up to date",
+                message: "Built from \(source.commitHash.prefix(7)).")
         case .installable:
             let install = showUpdateAlert(
-                title: "An update is available",
-                message: "Installing pulls \(source.updateBranch) in \(source.clonePath), rebuilds, "
-                    + "and relaunches the app.",
+                title: "Update available",
+                message: UpdateCore.installMessage(clone: clone, branch: source.updateBranch),
                 buttons: ["Install", "Later"])
-            if install == .alertFirstButtonReturn { installUpdate() }
-        case .cloneHasLocalChanges:
+            if install == .alertFirstButtonReturn { installUpdate(confirmed: true) }
+        case .blocked(let reason):
+            explainBlocked(reason, source: source)
+        }
+    }
+
+    /// Finder is offered only for uncommitted changes, the one case the user fixes in the clone.
+    private func explainBlocked(_ reason: CloneBlockReason, source: BuildSource) {
+        let message = UpdateCore.blockedMessage(reason: reason, branch: source.updateBranch)
+        if reason == .uncommittedChanges {
             let reveal = showUpdateAlert(
-                title: "An update is available",
-                message: UpdateCore.blockedMessage(
-                    reason: UpdateCore.blockReason(clone: clone, branch: source.updateBranch)
-                        ?? .notTrackingUpstream,
-                    clonePath: source.clonePath, branch: source.updateBranch),
-                buttons: ["Show in Finder", "OK"])
+                title: "Update available", message: message, buttons: ["Show in Finder", "OK"])
             if reveal == .alertFirstButtonReturn { revealClone() }
+        } else {
+            showUpdateAlert(title: "Update available", message: message)
         }
     }
 
     @objc func updateItemClicked() {
         switch updateMenuState {
         case .available:
-            // Installs, or opens the clone in Finder if it can't be pulled.
+            // Installs, or explains why it can't.
             installUpdate()
         case .failed:
             NSWorkspace.shared.open(updateLogURL)
@@ -116,10 +121,14 @@ extension AppDelegate {
         }
     }
 
-    /// Re-reads the clone first: the last check may be hours old.
-    func installUpdate() {
+    /// Re-reads the clone first: the last check may be hours old. `confirmed` means the user already
+    /// saw what Install does to the clone.
+    func installUpdate(confirmed: Bool = false) {
         guard let source = buildSource, let latest = latestUpdateHash else { return }
-        guard let clone = inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: latest)
+        guard
+            let clone = inspectClone(
+                at: source.clonePath, updateBranch: source.updateBranch, builtHash: source.commitHash,
+                latestHash: latest)
         else {
             updateMenuState = .hidden
             refreshUpdateItem()
@@ -130,10 +139,24 @@ extension AppDelegate {
         switch status {
         case .upToDate:
             updateMenuState = .hidden
-        case .cloneHasLocalChanges:
-            updateMenuState = .available(.cloneHasLocalChanges)
-            revealClone()
+        case .blocked(let reason):
+            updateMenuState = .available(status)
+            refreshUpdateItem()
+            // The row already says the clone has local changes, so go straight to it.
+            if reason == .uncommittedChanges {
+                revealClone()
+            } else {
+                explainBlocked(reason, source: source)
+            }
         case .installable:
+            // Building another branch leaves that branch's changes out of the app, so say so first.
+            if !confirmed && clone.branch != source.updateBranch {
+                let install = showUpdateAlert(
+                    title: "Install update?",
+                    message: UpdateCore.installMessage(clone: clone, branch: source.updateBranch),
+                    buttons: ["Install", "Cancel"])
+                guard install == .alertFirstButtonReturn else { return }
+            }
             updateMenuState = .installing
             let started = startUpdateInstall(source: source) { [weak self] in
                 self?.updateMenuState = .failed

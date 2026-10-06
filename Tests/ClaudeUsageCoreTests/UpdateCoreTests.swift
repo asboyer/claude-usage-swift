@@ -13,6 +13,7 @@ struct UpdateCoreTests {
         remoteURL: String? = "git@github.com:asboyer/claude-usage-swift.git",
         upstreamBranch: String? = "master",
         unpushed: Int? = 0,
+        aheadOfUpdateBranch: Int? = 0,
         includesLatest: Bool = false
     ) -> CloneState {
         CloneState(
@@ -21,6 +22,7 @@ struct UpdateCoreTests {
             upstreamRemoteURL: remoteURL,
             upstreamBranch: upstreamBranch,
             unpushedCommitCount: unpushed,
+            commitsNotOnUpdateBranch: aheadOfUpdateBranch,
             buildIncludesLatest: includesLatest
         )
     }
@@ -45,54 +47,62 @@ struct UpdateCoreTests {
         #expect(status == .installable)
     }
 
-    @Test func otherBranchIsNotInstallable() {
+    @Test func otherBranchWithCleanMasterIsInstallable() {
+        // The install switches to master, pulls, builds, and switches back.
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(branch: "feat/x"), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .installable)
     }
 
-    @Test func detachedHeadIsNotInstallable() {
+    @Test func otherBranchWithUncommittedChangesIsBlockedByThoseChanges() {
+        let status = UpdateCore.status(
+            builtHash: built, latestHash: latest, clone: clone(branch: "feat/x", dirty: true), branch: "master")
+        #expect(status == .blocked(.uncommittedChanges))
+    }
+
+    @Test func detachedHeadIsInstallable() {
+        // The install switches back to the checked-out commit afterwards.
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(branch: nil), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .installable)
     }
 
-    @Test func uncommittedChangesAreNotInstallable() {
+    @Test func uncommittedChangesOnTheUpdateBranchAreBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(dirty: true), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.uncommittedChanges))
     }
 
-    @Test func unpushedCommitsAreNotInstallable() {
+    @Test func unpushedCommitsOnLocalMasterAreBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(unpushed: 2), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.unpushedCommits))
     }
 
-    @Test func uncountableUnpushedCommitsAreNotInstallable() {
+    @Test func uncountableUnpushedCommitsAreBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(unpushed: nil), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.unpushedCommits))
     }
 
-    @Test func forkUpstreamIsNotInstallable() {
+    @Test func forkUpstreamIsBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest,
             clone: clone(remoteURL: "git@github.com:someone/claude-usage-swift.git"), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.notTrackingUpstream))
     }
 
-    @Test func missingUpstreamIsNotInstallable() {
+    @Test func missingLocalMasterIsBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest,
             clone: clone(remoteURL: nil, upstreamBranch: nil, unpushed: nil), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.notTrackingUpstream))
     }
 
-    @Test func masterTrackingAnotherUpstreamBranchIsNotInstallable() {
+    @Test func masterTrackingAnotherUpstreamBranchIsBlocked() {
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(upstreamBranch: "dev"), branch: "master")
-        #expect(status == .cloneHasLocalChanges)
+        #expect(status == .blocked(.notTrackingUpstream))
     }
 
     @Test func overriddenBranchIsInstallableWhenCloneIsOnIt() {
@@ -120,43 +130,75 @@ struct UpdateCoreTests {
 
     @Test func blockReasonNamesTheFirstProblem() {
         #expect(UpdateCore.blockReason(clone: clone(), branch: "master") == nil)
-        #expect(UpdateCore.blockReason(clone: clone(branch: nil), branch: "master") == .detachedHead)
+        #expect(UpdateCore.blockReason(clone: clone(branch: nil), branch: "master") == nil)
+        #expect(UpdateCore.blockReason(clone: clone(branch: "feat/x"), branch: "master") == nil)
         #expect(
-            UpdateCore.blockReason(clone: clone(branch: "feat/x", dirty: true), branch: "master")
-                == .otherBranch("feat/x"))
-        #expect(UpdateCore.blockReason(clone: clone(dirty: true), branch: "master") == .uncommittedChanges)
+            UpdateCore.blockReason(clone: clone(branch: "feat/x", dirty: true, unpushed: 3), branch: "master")
+                == .uncommittedChanges)
         #expect(UpdateCore.blockReason(clone: clone(unpushed: 3), branch: "master") == .unpushedCommits)
-        #expect(UpdateCore.blockReason(clone: clone(unpushed: nil), branch: "master") == .unpushedCommits)
         #expect(
             UpdateCore.blockReason(
-                clone: clone(remoteURL: "git@github.com:someone/claude-usage-swift.git"), branch: "master")
-                == .notTrackingUpstream)
-        #expect(
-            UpdateCore.blockReason(
-                clone: clone(remoteURL: nil, upstreamBranch: nil, unpushed: nil), branch: "master")
+                clone: clone(remoteURL: "git@github.com:someone/claude-usage-swift.git", unpushed: 3),
+                branch: "master")
                 == .notTrackingUpstream)
     }
 
     // MARK: - blockedMessage
 
-    @Test func otherBranchMessageNamesBothBranches() {
-        let message = UpdateCore.blockedMessage(
-            reason: .otherBranch("feat/in-app-updater"), clonePath: "/clone", branch: "master")
+    @Test func blockedMessagesAreTwoShortLines() {
         #expect(
-            message
-                == "Your clone at /clone is on the feat/in-app-updater branch, not master, "
-                + "so the app won't switch branches for you. Update the clone yourself, then run ./update.sh.")
+            UpdateCore.blockedMessage(reason: .uncommittedChanges, branch: "master")
+                == "Your clone has uncommitted changes.\nCommit or stash them, then check again.")
+        #expect(
+            UpdateCore.blockedMessage(reason: .unpushedCommits, branch: "master")
+                == "Your local master has commits that aren't on GitHub.\nUpdate it yourself, then run ./update.sh.")
+        #expect(
+            UpdateCore.blockedMessage(reason: .notTrackingUpstream, branch: "master")
+                == "Your local master is missing or tracks a fork.\nUpdate it yourself, then run ./update.sh.")
     }
 
-    @Test func everyBlockedMessageEndsWithWhatToDo() {
-        let reasons: [CloneBlockReason] = [
-            .detachedHead, .otherBranch("x"), .uncommittedChanges, .unpushedCommits, .notTrackingUpstream,
-        ]
-        for reason in reasons {
-            let message = UpdateCore.blockedMessage(reason: reason, clonePath: "/clone", branch: "master")
-            #expect(message.hasPrefix("Your clone at /clone "))
-            #expect(message.hasSuffix(" Update the clone yourself, then run ./update.sh."))
-        }
+    // MARK: - installMessage
+
+    @Test func installMessageOnTheUpdateBranchIsOneLine() {
+        let message = UpdateCore.installMessage(clone: clone(), branch: "master")
+        #expect(message == "Claude Usage will pull the latest master, rebuild, and restart.")
+    }
+
+    @Test func installMessageFromABranchAheadOfMasterSaysWhatIsLeftOut() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 3), branch: "master")
+        #expect(
+            message
+                == """
+                Claude Usage will rebuild from master and restart.
+                Your clone switches to master, then back to feat/x.
+                3 commits on feat/x won't be in the new app.
+                """)
+    }
+
+    @Test func installMessageUsesSingularForOneCommit() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 1), branch: "master")
+        #expect(message.hasSuffix("\n1 commit on feat/x won't be in the new app."))
+    }
+
+    @Test func installMessageFromABranchWithNothingNewIsTwoLines() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 0), branch: "master")
+        #expect(message.hasSuffix("then back to feat/x."))
+    }
+
+    @Test func installMessageWhenTheCountIsUnknownStillWarns() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: nil), branch: "master")
+        #expect(message.hasSuffix("\nCommits on feat/x won't be in the new app."))
+    }
+
+    @Test func installMessageFromADetachedHeadSwitchesBackToTheCommit() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: nil, aheadOfUpdateBranch: 2), branch: "master")
+        #expect(message.contains("then back to the current commit."))
+        #expect(message.hasSuffix("\n2 commits not on master won't be in the new app."))
     }
 
     // MARK: - menuTitle
@@ -165,8 +207,14 @@ struct UpdateCoreTests {
         #expect(UpdateCore.menuTitle(for: .upToDate) == nil)
         #expect(UpdateCore.menuTitle(for: .installable) == "Update available — click to install")
         #expect(
-            UpdateCore.menuTitle(for: .cloneHasLocalChanges)
+            UpdateCore.menuTitle(for: .blocked(.uncommittedChanges))
                 == "Update available (clone has local changes)")
+        #expect(
+            UpdateCore.menuTitle(for: .blocked(.unpushedCommits))
+                == "Update available (can't install automatically)")
+        #expect(
+            UpdateCore.menuTitle(for: .blocked(.notTrackingUpstream))
+                == "Update available (can't install automatically)")
     }
 
     // MARK: - parseCommitHash
