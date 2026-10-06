@@ -99,7 +99,7 @@ struct SpendLedger: Codable, Equatable {
     }
 
     /// Turns a new reading of Claude's monthly Extra total into an increase. The total resets each
-    /// month, so a reading in a new month counts from zero.
+    /// month, so a reading in a new month, or one below the last, counts from zero.
     mutating func recordClaudeExtra(dollars: Double, at now: Date, calendar: Calendar = .current) {
         let month = SpendLedgerBuilder.monthKey(now, calendar: calendar)
         let previous = lastClaudeExtra
@@ -114,7 +114,9 @@ struct SpendLedger: Codable, Equatable {
             }
             return
         }
-        let increase = dollars - previous.dollars
+        // A drop within the month key is a reset that doesn't follow the local calendar month
+        // (UTC or billing date), so everything since the last reading is new spend.
+        let increase = dollars < previous.dollars ? dollars : dollars - previous.dollars
         if increase > 0.005 {
             pendingClaudeExtra.append(ClaudeExtraIncrease(start: previous.at, end: now, dollars: increase))
         }

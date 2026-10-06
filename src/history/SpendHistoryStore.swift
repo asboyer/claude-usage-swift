@@ -37,7 +37,6 @@ func rescanSpendLedger(includeCodex: Bool, now: Date = Date()) -> SpendLedger {
     let pending = loadSpendLedger().pendingClaudeExtra
     let twentyYears = 24 * 365 * 20
     let claude = ClaudeCodeTranscripts.recentRequests(windowHours: twentyYears, now: now)
-    let claudeExtra = SpendLedgerBuilder.claudeDays(increases: pending, requests: claude)
     let codex = includeCodex ? scanCodexSessions(modifiedSince: .distantPast) : (requests: [], readings: [])
     let codexExtra = SpendLedgerBuilder.codexDays(requests: codex.requests, readings: codex.readings)
     let usage = SpendLedgerBuilder.usageDays(claude: claude, codex: codex.requests)
@@ -45,9 +44,11 @@ func rescanSpendLedger(includeCodex: Bool, now: Date = Date()) -> SpendLedger {
     spendLedgerLock.lock()
     defer { spendLedgerLock.unlock() }
     var ledger = readSpendLedger()
-    ledger.add(days: claudeExtra)
-    // Increases recorded while the scan ran stay pending for the next one.
-    ledger.pendingClaudeExtra.removeAll { pending.contains($0) }
+    // A scan that finished first has already attributed and cleared some of `pending`, and adding
+    // those again would double them. Increases recorded while the scan ran stay pending.
+    let unclaimed = pending.filter { ledger.pendingClaudeExtra.contains($0) }
+    ledger.add(days: SpendLedgerBuilder.claudeDays(increases: unclaimed, requests: claude))
+    ledger.pendingClaudeExtra.removeAll { unclaimed.contains($0) }
     ledger.mergeCodex(days: codexExtra)
     ledger.mergeUsage(days: usage)
     ledger.lastScan = now

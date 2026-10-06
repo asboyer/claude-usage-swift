@@ -60,6 +60,16 @@ struct SpendHistoryCoreTests {
         #expect(ledger.pendingClaudeExtra.last?.start == nil)
     }
 
+    @Test func claudeDropWithinTheMonthCountsFromZero() {
+        var ledger = SpendLedger()
+        ledger.recordClaudeExtra(dollars: 300, at: date("2026-10-15", hour: 9), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 4, at: date("2026-10-15", hour: 10), calendar: calendar)
+        #expect(
+            ledger.pendingClaudeExtra.last
+                == ClaudeExtraIncrease(
+                    start: date("2026-10-15", hour: 9), end: date("2026-10-15", hour: 10), dollars: 4))
+    }
+
     @Test func claudeIncreaseSplitsAcrossModelsByApiCost() {
         let increase = ClaudeExtraIncrease(
             start: date("2026-10-05", hour: 10), end: date("2026-10-05", hour: 11), dollars: 30)
