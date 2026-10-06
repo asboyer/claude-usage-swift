@@ -23,6 +23,19 @@ struct SpendEntry: Codable, Equatable {
     var dollars = 0.0
     var credits = 0.0
 
+    init(tokens: Int = 0, dollars: Double = 0, credits: Double = 0) {
+        self.tokens = tokens
+        self.dollars = dollars
+        self.credits = credits
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try values.decodeIfPresent(Int.self, forKey: .tokens) ?? 0
+        dollars = try values.decodeIfPresent(Double.self, forKey: .dollars) ?? 0
+        credits = try values.decodeIfPresent(Double.self, forKey: .credits) ?? 0
+    }
+
     mutating func add(_ other: SpendEntry) {
         tokens += other.tokens
         dollars += other.dollars
@@ -60,9 +73,36 @@ struct SpendLedger: Codable, Equatable {
     var lastScan: Date?
     /// Kept apart from `lastScan`: a provider switched on later needs its first scan in full.
     var lastCodexScan: Date?
-    /// The latest limit reading any scan has seen. An incremental scan skips older session files, so
-    /// a request early in a new session is judged against this when nothing it read comes before it.
+    /// The latest limit reading from before the next rescan's cutoff. That rescan skips the files
+    /// holding it, so a request early in a new session is judged against it when nothing read comes
+    /// before the request.
     var lastCodexReading: CodexLimitReading?
+    /// Day keys stay in the time zone the ledger was started in, so a trip abroad cannot file one
+    /// request under two different days and count it twice.
+    var timeZone: String?
+
+    var calendar: Calendar {
+        var calendar = Calendar.current
+        if let timeZone, let zone = TimeZone(identifier: timeZone) { calendar.timeZone = zone }
+        return calendar
+    }
+
+    init() {}
+
+    /// Fields missing from an older file take their defaults, so a new field never makes the
+    /// history past Claude Code's 30-day transcript window unreadable.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        days = try values.decodeIfPresent(SpendDays.self, forKey: .days) ?? [:]
+        pendingClaudeExtra = try values.decodeIfPresent([ClaudeExtraIncrease].self, forKey: .pendingClaudeExtra) ?? []
+        lastClaudeExtra = try values.decodeIfPresent(ClaudeExtraReading.self, forKey: .lastClaudeExtra)
+        claudeExtraDip = try values.decodeIfPresent(ClaudeExtraReading.self, forKey: .claudeExtraDip)
+        claudeTrackedSince = try values.decodeIfPresent(Date.self, forKey: .claudeTrackedSince)
+        lastScan = try values.decodeIfPresent(Date.self, forKey: .lastScan)
+        lastCodexScan = try values.decodeIfPresent(Date.self, forKey: .lastCodexScan)
+        lastCodexReading = try values.decodeIfPresent(CodexLimitReading.self, forKey: .lastCodexReading)
+        timeZone = try values.decodeIfPresent(String.self, forKey: .timeZone)
+    }
 
     /// Keeps, per day and model, whichever entry of `provider` covers more tokens. A scan only ever
     /// sees fewer tokens for a day than before once older session files have been deleted, or when
@@ -80,13 +120,12 @@ struct SpendLedger: Codable, Equatable {
     }
 
     /// Merges the Codex overage found in one scan, judging each request against the readings the scan
-    /// read plus the latest one an earlier scan saw.
-    mutating func mergeCodexScan(
-        requests: [CodexModelRequest], readings: [CodexLimitReading], calendar: Calendar = .current
-    ) {
+    /// read plus the one an earlier scan kept from before this scan's cutoff. Every reading at or after
+    /// `nextCutoff` is in a file the next rescan reads again, so only the latest before it is kept.
+    mutating func mergeCodexScan(requests: [CodexModelRequest], readings: [CodexLimitReading], nextCutoff: Date) {
         let all = readings + [lastCodexReading].compactMap { $0 }
         merge(.codex, days: SpendLedgerBuilder.codexDays(requests: requests, readings: all, calendar: calendar))
-        lastCodexReading = all.max { $0.timestamp < $1.timestamp }
+        lastCodexReading = all.filter { $0.timestamp < nextCutoff }.max { $0.timestamp < $1.timestamp }
     }
 
     /// Claude attributions are final once made, so they add rather than replace.

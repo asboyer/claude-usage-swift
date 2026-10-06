@@ -204,11 +204,13 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double) -> S
     let filters: [(key: String, providers: Set<SpendProvider>)] =
         [("all", Set(SpendProvider.allCases))] + (present.count > 1 ? present.map { ($0.rawValue, [$0]) } : [])
     if let ledger {
+        // Period titles name the days the ledger was keyed in.
+        pageDateFormatter.timeZone = ledger.calendar.timeZone
         for granularity in SpendGranularity.allCases {
             func periods(_ providers: Set<SpendProvider>) -> [SpendPeriod] {
                 return SpendHistoryCore.periods(
                     from: ledger, providers: providers, granularity: granularity, count: 12,
-                    pricePerCredit: pricePerCredit)
+                    pricePerCredit: pricePerCredit, calendar: ledger.calendar)
             }
             // Every filter shares one period list, starting at the first period with any spend, so
             // switching filters keeps the selected period.

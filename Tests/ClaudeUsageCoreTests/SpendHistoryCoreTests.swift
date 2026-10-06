@@ -182,16 +182,44 @@ struct SpendHistoryCoreTests {
     }
 
     @Test func codexRescanJudgesANewSessionByTheLastScansReading() {
-        // The weekly limit hit 100% in a session the incremental rescan no longer reads.
+        // The weekly limit hit 100% in a session the incremental rescans no longer read.
         let exhausted = CodexLimitReading(
             timestamp: date("2026-10-01"),
             windows: [CodexLimitWindow(usedPercent: 100, resetsAt: date("2026-10-08"))]
         )
+        let laterReading = CodexLimitReading(
+            timestamp: date("2026-10-05", hour: 13),
+            windows: [CodexLimitWindow(usedPercent: 100, resetsAt: date("2026-10-08"))]
+        )
+        let r1 = codex("r1", "2026-10-05")
         var ledger = SpendLedger()
-        ledger.mergeCodexScan(requests: [], readings: [exhausted], calendar: calendar)
-        ledger.mergeCodexScan(requests: [codex("r1", "2026-10-05")], readings: [], calendar: calendar)
-        #expect(ledger.days["2026-10-05"]?["codex"] == ["gpt-6-astra": SpendEntry(tokens: 1_000_000, credits: 250)])
+        ledger.timeZone = "America/New_York"
+        ledger.mergeCodexScan(requests: [], readings: [exhausted], nextCutoff: date("2026-10-04", hour: 0))
+        ledger.mergeCodexScan(requests: [r1], readings: [laterReading], nextCutoff: date("2026-10-04", hour: 0))
+        // A later rescan reads the same session again, with a newer request after its reading.
+        let r2 = CodexModelRequest(
+            responseID: "r2", timestamp: date("2026-10-05", hour: 14), model: "gpt-6-astra",
+            inputTokens: 2_000_000, cachedInputTokens: 0, outputTokens: 0)
+        ledger.mergeCodexScan(requests: [r1, r2], readings: [laterReading], nextCutoff: date("2026-10-04", hour: 0))
+        #expect(ledger.days["2026-10-05"]?["codex"] == ["gpt-6-astra": SpendEntry(tokens: 3_000_000, credits: 750)])
         #expect(ledger.lastCodexReading == exhausted)
+    }
+
+    @Test func ledgerKeysDaysInItsOwnTimeZone() {
+        var ledger = SpendLedger()
+        ledger.timeZone = "America/New_York"
+        // 02:00 UTC on the 2nd is still the 1st in New York, wherever the Mac is now.
+        let request = OpencodeRequestCost(
+            timestamp: ISO8601DateFormatter().date(from: "2026-10-02T02:00:00Z")!, model: "m", tokens: 1, costUSD: 5)
+        let days = SpendLedgerBuilder.opencodeDays(requests: [request], calendar: ledger.calendar)
+        #expect(days.keys.sorted() == ["2026-10-01"])
+    }
+
+    @Test func ledgerFromAnOlderVersionDecodesWithDefaults() throws {
+        let json = #"{"days":{"2026-10-01":{"codex":{"m":{"tokens":5}}}},"pendingClaudeExtra":[]}"#
+        let ledger = try JSONDecoder().decode(SpendLedger.self, from: Data(json.utf8))
+        #expect(ledger.days["2026-10-01"]?["codex"]?["m"] == SpendEntry(tokens: 5))
+        #expect(ledger.timeZone == nil && ledger.lastCodexReading == nil)
     }
 
     @Test func displayModelDropsContextAndDateSuffixes() {
