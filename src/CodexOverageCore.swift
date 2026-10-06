@@ -156,11 +156,55 @@ struct CodexModelOverage: Equatable {
     }
 }
 
+/// How far back the Codex Extra row counts overage.
+enum CodexOveragePeriod: String, CaseIterable {
+    case month
+    case week
+    case day
+
+    /// Matches Claude's Extra spend, which is a monthly total.
+    static let defaultPeriod: CodexOveragePeriod = .month
+
+    var menuTitle: String {
+        switch self {
+        case .month: return "Month"
+        case .week: return "Week"
+        case .day: return "Day"
+        }
+    }
+
+    /// Follows the credit count in the Extra row, as in "1,174 credits this month".
+    var rowSuffix: String {
+        switch self {
+        case .month: return "this month"
+        case .week: return "this week"
+        case .day: return "today"
+        }
+    }
+
+    /// Month and day follow the local calendar. A week follows Codex's own weekly limit window,
+    /// which resets on its own schedule rather than on a calendar boundary.
+    func range(now: Date, weeklyWindow: CodexRateWindow?, calendar: Calendar = .current) -> (start: Date, end: Date?) {
+        switch self {
+        case .month, .day:
+            let component: Calendar.Component = self == .month ? .month : .day
+            guard let interval = calendar.dateInterval(of: component, for: now) else { return (now, nil) }
+            return (interval.start, interval.end)
+        case .week:
+            let reported = weeklyWindow?.windowSeconds ?? 0
+            let windowSeconds = reported > 0 ? reported : CodexWindowSelector.weeklyWindowSeconds
+            let end = weeklyWindow?.resetsAt
+            return ((end ?? now).addingTimeInterval(-windowSeconds), end)
+        }
+    }
+}
+
 struct CodexOverageEstimate: Equatable {
-    /// When the counted period began: the start of the current weekly window.
+    /// When the counted period began.
     let periodStart: Date
-    /// When the weekly window resets and the estimate starts over, if Codex reported it.
+    /// When the period ends and the estimate starts over, if known.
     let periodEnd: Date?
+    var period: CodexOveragePeriod = .defaultPeriod
     var credits: Double = 0
     var overageRequests = 0
     /// Requests sent at the limit on a model the rate card does not list, left out of `credits`.
@@ -188,9 +232,10 @@ enum CodexOverageCore {
         requests: [CodexModelRequest],
         readings: [CodexLimitReading],
         since start: Date,
-        until end: Date? = nil
+        until end: Date? = nil,
+        period: CodexOveragePeriod = .defaultPeriod
     ) -> CodexOverageEstimate {
-        var estimate = CodexOverageEstimate(periodStart: start, periodEnd: end)
+        var estimate = CodexOverageEstimate(periodStart: start, periodEnd: end, period: period)
         let timeline = readings.sorted { $0.timestamp < $1.timestamp }
         var byModel: [String: CodexModelOverage] = [:]
         var seen = Set<String>()
@@ -233,15 +278,30 @@ enum CodexOverageCore {
         return low > 0 ? timeline[low - 1] : nil
     }
 
-    /// The counted period as "Mon Oct 5, 2:42 PM – Mon Oct 12, 2:42 PM" in local time.
+    /// The counted period in local time: "Oct 1 – Oct 31, 2026" for a month, "Tue Oct 6" for a
+    /// day, and "Mon Oct 5, 2:42 PM – Mon Oct 12, 2:42 PM" for Codex's weekly window.
     static func formatPeriod(_ estimate: CodexOverageEstimate, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.timeZone = timeZone
-        formatter.dateFormat = "EEE MMM d, h:mm a"
-        let start = formatter.string(from: estimate.periodStart)
-        guard let end = estimate.periodEnd else { return "Since \(start)" }
-        return "\(start) – \(formatter.string(from: end))"
+        func format(_ date: Date, _ pattern: String) -> String {
+            formatter.dateFormat = pattern
+            return formatter.string(from: date)
+        }
+
+        switch estimate.period {
+        case .day:
+            return format(estimate.periodStart, "EEE MMM d")
+        case .month:
+            guard let end = estimate.periodEnd else { return "Since " + format(estimate.periodStart, "MMM d, yyyy") }
+            // The period ends at midnight on the 1st, so the last day shown is the one before it.
+            let lastDay = end.addingTimeInterval(-1)
+            return format(estimate.periodStart, "MMM d") + " – " + format(lastDay, "MMM d, yyyy")
+        case .week:
+            let start = format(estimate.periodStart, "EEE MMM d, h:mm a")
+            guard let end = estimate.periodEnd else { return "Since \(start)" }
+            return "\(start) – " + format(end, "EEE MMM d, h:mm a")
+        }
     }
 
     /// Accepts "0.04", "$0.04", or a comma decimal such as "0,04".

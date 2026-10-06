@@ -229,10 +229,65 @@ struct CodexOverageCoreTests {
     @Test func formatPeriodSpansTheWeeklyWindowInLocalTime() {
         let newYork = TimeZone(identifier: "America/New_York")!
         let windowStart = Date(timeIntervalSince1970: 1_791_225_720)  // 2026-10-05 18:42 UTC
-        let bounded = CodexOverageEstimate(periodStart: windowStart, periodEnd: windowStart.addingTimeInterval(604_800))
+        let bounded = CodexOverageEstimate(
+            periodStart: windowStart, periodEnd: windowStart.addingTimeInterval(604_800), period: .week)
         #expect(CodexOverageCore.formatPeriod(bounded, timeZone: newYork) == "Mon Oct 5, 2:42 PM – Mon Oct 12, 2:42 PM")
-        let open = CodexOverageEstimate(periodStart: windowStart, periodEnd: nil)
+        let open = CodexOverageEstimate(periodStart: windowStart, periodEnd: nil, period: .week)
         #expect(CodexOverageCore.formatPeriod(open, timeZone: newYork) == "Since Mon Oct 5, 2:42 PM")
+    }
+
+    @Test func formatPeriodShowsAMonthByItsFirstAndLastDay() {
+        let range = CodexOveragePeriod.month.range(now: octoberSixth, weeklyWindow: nil, calendar: newYorkCalendar)
+        let estimate = CodexOverageEstimate(periodStart: range.start, periodEnd: range.end, period: .month)
+        #expect(CodexOverageCore.formatPeriod(estimate, timeZone: newYorkCalendar.timeZone) == "Oct 1 – Oct 31, 2026")
+    }
+
+    @Test func formatPeriodShowsADayByItsDate() {
+        let range = CodexOveragePeriod.day.range(now: octoberSixth, weeklyWindow: nil, calendar: newYorkCalendar)
+        let estimate = CodexOverageEstimate(periodStart: range.start, periodEnd: range.end, period: .day)
+        #expect(CodexOverageCore.formatPeriod(estimate, timeZone: newYorkCalendar.timeZone) == "Tue Oct 6")
+    }
+
+    // MARK: - Periods
+
+    private var newYorkCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return calendar
+    }
+
+    /// 2026-10-06 17:00 UTC, which is 1:00 PM in New York.
+    private let octoberSixth = Date(timeIntervalSince1970: 1_791_306_000)
+
+    @Test func monthPeriodCoversTheLocalCalendarMonth() {
+        let range = CodexOveragePeriod.month.range(now: octoberSixth, weeklyWindow: nil, calendar: newYorkCalendar)
+        #expect(range.start == Date(timeIntervalSince1970: 1_790_827_200))  // Oct 1 00:00 EDT
+        #expect(range.end == Date(timeIntervalSince1970: 1_793_505_600))  // Nov 1 00:00 EDT
+    }
+
+    @Test func dayPeriodStartsAtLocalMidnight() {
+        let range = CodexOveragePeriod.day.range(now: octoberSixth, weeklyWindow: nil, calendar: newYorkCalendar)
+        #expect(range.start == Date(timeIntervalSince1970: 1_791_259_200))  // Oct 6 00:00 EDT
+        #expect(range.end == Date(timeIntervalSince1970: 1_791_345_600))  // Oct 7 00:00 EDT
+    }
+
+    @Test func weekPeriodFollowsCodexsWeeklyWindowNotTheCalendar() {
+        let resetsAt = Date(timeIntervalSince1970: 1_791_830_520)  // Mon Oct 12 18:42 UTC
+        let weekly = CodexRateWindow(usedPercent: 47, windowSeconds: 604_800, resetsAt: resetsAt)
+        let range = CodexOveragePeriod.week.range(now: octoberSixth, weeklyWindow: weekly, calendar: newYorkCalendar)
+        #expect(range.start == resetsAt.addingTimeInterval(-604_800))
+        #expect(range.end == resetsAt)
+    }
+
+    @Test func weekPeriodFallsBackToTheLastSevenDaysWithoutAWeeklyWindow() {
+        let range = CodexOveragePeriod.week.range(now: octoberSixth, weeklyWindow: nil, calendar: newYorkCalendar)
+        #expect(range.start == octoberSixth.addingTimeInterval(-604_800))
+        #expect(range.end == nil)
+    }
+
+    @Test func monthIsTheDefaultPeriod() {
+        #expect(CodexOveragePeriod.defaultPeriod == .month)
+        #expect(CodexOverageCore.estimate(requests: [], readings: [], since: start).period == .month)
     }
 
     // MARK: - Price Setting

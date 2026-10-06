@@ -134,6 +134,20 @@ extension AppDelegate {
         creditPriceItem.submenu = creditPriceMenu
         settingsMenu.addItem(creditPriceItem)
 
+        // Codex Extra Usage Window submenu — how far back the Codex Extra row counts
+        let overagePeriodMenu = NSMenu()
+        codexOveragePeriodItems = CodexOveragePeriod.allCases.map { period in
+            let title = period == .defaultPeriod ? "\(period.menuTitle) (default)" : period.menuTitle
+            let item = NSMenuItem(title: title, action: #selector(selectCodexOveragePeriod(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = period.rawValue
+            overagePeriodMenu.addItem(item)
+            return item
+        }
+        let overagePeriodItem = NSMenuItem(title: "Codex Extra Usage Window", action: nil, keyEquivalent: "")
+        overagePeriodItem.submenu = overagePeriodMenu
+        settingsMenu.addItem(overagePeriodItem)
+
         cursorTrackingItem = NSMenuItem(
             title: "Track Cursor Usage",
             action: #selector(toggleCursorTracking),
@@ -338,6 +352,7 @@ extension AppDelegate {
         updateAlarmMenu()
         updateSoundMenu()
         updateCodexCreditPriceMenu()
+        updateCodexOveragePeriodMenu()
     }
 
     func rebuildMenu() {
@@ -1331,10 +1346,14 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
     /// reads hundreds of megabytes; the row updates whenever the estimate lands.
     func refreshCodexOverage(_ usage: CodexUsage?) {
         guard codexTrackingEnabled, let usage else { return }
+        lastCodexUsage = usage
+        let period = codexOveragePeriod
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let estimate = estimateCodexOverage(usage: usage)
+            let estimate = estimateCodexOverage(usage: usage, period: period)
             DispatchQueue.main.async {
                 guard let self, self.codexTrackingEnabled, self.codexAvailable else { return }
+                // A scan started before the window setting changed would show the wrong period.
+                guard period == self.codexOveragePeriod else { return }
                 self.codexOverage = estimate
                 self.updateCodexStatusDisplayMode()
                 self.codexStatusText = self.currentCodexStatusText()
@@ -1374,7 +1393,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         return statusText(percent: window.usedPercent, resetsAt: window.resetsAt)
     }
 
-    /// Shows the estimated spend past Codex's limits this weekly window, hidden until there is
+    /// Shows the estimated spend past Codex's limits in the chosen period, hidden until there is
     /// some. Its submenu spells out the period and splits the spend by model.
     func updateCodexExtraItem() {
         guard let item = usageItems[codexExtraKey] else { return }
@@ -1386,8 +1405,9 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         let label = categoryLabel(for: codexExtraKey)
         let dollars = CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
         let credits = CodexOverageCore.formatCredits(overage.credits)
-        item.title = "\(label): ~\(dollars) (\(credits) this week)"
-        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", "\(credits) this week")
+        let suffix = overage.period.rowSuffix
+        item.title = "\(label): ~\(dollars) (\(credits) \(suffix))"
+        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", "\(credits) \(suffix)")
         item.submenu = codexOverageBreakdownMenu(overage)
         item.isHidden = false
     }
@@ -1421,7 +1441,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         }
         let info =
             "Estimated from the tokens Codex logged on this Mac for each model request sent while "
-            + "a 5-hour or weekly limit was at 100%, since the current weekly window began. Priced "
+            + "a 5-hour or weekly limit was at 100%, during the period shown at the top "
+            + "(Settings › Codex Extra Usage Window). Priced "
             + "with OpenAI's Codex credit rates at \(CodexOverageCore.formatPrice(codexCreditPrice)) per "
             + "credit (Settings › Codex Credit Price). Codex Cloud tasks and other devices are not included."
         submenu.addItem(infoFooterItem(footer, info: info, alignedTo: rowWidths.max() ?? 0))
@@ -1461,6 +1482,20 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         codexCreditPriceCustomItem?.state = matchedPreset ? .off : .on
         codexCreditPriceCustomItem?.title =
             matchedPreset ? "Custom…" : "Custom (\(CodexOverageCore.formatPrice(codexCreditPrice)))…"
+    }
+
+    func updateCodexOveragePeriodMenu() {
+        for item in codexOveragePeriodItems {
+            item.state = item.representedObject as? String == codexOveragePeriod.rawValue ? .on : .off
+        }
+    }
+
+    @objc func selectCodexOveragePeriod(_ sender: NSMenuItem) {
+        guard
+            let raw = sender.representedObject as? String,
+            let period = CodexOveragePeriod(rawValue: raw)
+        else { return }
+        codexOveragePeriod = period
     }
 
     @objc func selectCodexCreditPrice(_ sender: NSMenuItem) {

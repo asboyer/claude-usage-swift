@@ -131,8 +131,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var codexCreditPriceItems: [NSMenuItem] = []
     var codexCreditPriceCustomItem: NSMenuItem!
 
-    // Credits Codex drew past its limits this weekly window, estimated from local sessions.
+    // How far back the Codex Extra row counts overage.
+    var codexOveragePeriod: CodexOveragePeriod = .defaultPeriod {
+        didSet {
+            UserDefaults.standard.set(codexOveragePeriod.rawValue, forKey: "codexOveragePeriod")
+            updateCodexOveragePeriodMenu()
+            guard menuReady, codexOveragePeriod != oldValue else { return }
+            // A longer period holds more credits, which must not read as new spend in the menu bar.
+            previousCodexOverageCredits = nil
+            refreshCodexOverage(lastCodexUsage)
+        }
+    }
+    var codexOveragePeriodItems: [NSMenuItem] = []
+
+    // Credits Codex drew past its limits in the chosen period, estimated from local sessions,
+    // and the Codex reading it was estimated against.
     var codexOverage: CodexOverageEstimate?
+    var lastCodexUsage: CodexUsage?
 
     // Codex's menu bar reading and whether its overage estimate currently owns that text.
     var codexStatusWindow: CodexRateWindow?
@@ -280,6 +295,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let savedPrice = ud.object(forKey: "codexCreditPrice") as? Double, savedPrice > 0 {
             codexCreditPrice = savedPrice
+        }
+        if let savedPeriod = ud.string(forKey: "codexOveragePeriod").flatMap(CodexOveragePeriod.init(rawValue:)) {
+            codexOveragePeriod = savedPeriod
         }
         if ud.object(forKey: "cursorTrackingEnabled") != nil {
             cursorTrackingEnabled = ud.bool(forKey: "cursorTrackingEnabled")

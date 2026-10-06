@@ -237,12 +237,11 @@ private struct CodexSessionScan {
 private var codexSessionScans: [URL: CodexSessionScan] = [:]
 private let codexSessionScanLock = NSLock()
 
-/// Estimates the credits Codex drew past its limits in the current weekly window, from the
-/// token usage Codex CLI logs per model request. Only sessions run on this machine are seen.
-func estimateCodexOverage(usage: CodexUsage, now: Date = Date()) -> CodexOverageEstimate? {
-    guard let weekly = usage.weekly else { return nil }
-    let windowSeconds = weekly.windowSeconds > 0 ? weekly.windowSeconds : CodexWindowSelector.weeklyWindowSeconds
-    let windowStart = (weekly.resetsAt ?? now).addingTimeInterval(-windowSeconds)
+/// Estimates the credits Codex drew past its limits during `period`, from the token usage
+/// Codex CLI logs per model request. Only sessions run on this machine are seen.
+func estimateCodexOverage(usage: CodexUsage, period: CodexOveragePeriod, now: Date = Date()) -> CodexOverageEstimate {
+    let range = period.range(now: now, weeklyWindow: usage.weekly)
+    let windowStart = range.start
 
     // Overlapping refreshes would otherwise parse the same files twice and race on the cache.
     codexSessionScanLock.lock()
@@ -267,10 +266,15 @@ func estimateCodexOverage(usage: CodexUsage, now: Date = Date()) -> CodexOverage
         requests.append(contentsOf: scan.requests)
         readings.append(contentsOf: scan.readings)
     }
-    // Files that fell out of the window are dropped rather than kept forever.
-    codexSessionScans = scans
+    // Files outside every period are dropped rather than kept forever. Those inside a longer
+    // period than this one stay cached, so switching the window setting does not rescan them.
+    let keepSince =
+        CodexOveragePeriod.allCases
+        .map { $0.range(now: now, weeklyWindow: usage.weekly).start }
+        .min() ?? windowStart
+    codexSessionScans = codexSessionScans.filter { $0.value.modified >= keepSince }.merging(scans) { $1 }
     return CodexOverageCore.estimate(
-        requests: requests, readings: readings, since: windowStart, until: weekly.resetsAt)
+        requests: requests, readings: readings, since: windowStart, until: range.end, period: period)
 }
 
 private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: Int, modified: Date)] {
@@ -287,7 +291,7 @@ private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: 
     for case let url as URL in enumerator where url.pathExtension == "jsonl" {
         let values = try? url.resourceValues(forKeys: Set(keys))
         guard values?.isRegularFile == true else { continue }
-        // A session untouched since the window opened cannot hold a request inside it.
+        // A session untouched since the period began cannot hold a request inside it.
         guard let modified = values?.contentModificationDate, modified >= cutoff else { continue }
         files.append((url, values?.fileSize ?? 0, modified))
     }
