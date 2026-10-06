@@ -31,6 +31,13 @@ extension AppDelegate {
         breakdownItem.keyEquivalentModifierMask = []
         menu.addItem(breakdownItem)
 
+        let historyItem = NSMenuItem(
+            title: "Spend History", action: #selector(showSpendHistory), keyEquivalent: "h"
+        )
+        historyItem.target = self
+        historyItem.keyEquivalentModifierMask = []
+        menu.addItem(historyItem)
+
         let copyItem = NSMenuItem(title: "Copy Usage", action: #selector(copyUsage), keyEquivalent: "c")
         copyItem.target = self
         copyItem.keyEquivalentModifierMask = []
@@ -622,6 +629,62 @@ extension AppDelegate {
         breakdownPanel = panel
     }
 
+    @objc func showSpendHistory() {
+        spendHistoryPanel?.close()
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            styleMask: [.titled, .closable, .resizable, .hudWindow, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Spend"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.level = .floating
+        panel.center()
+
+        let webView = WKWebView(frame: panel.contentView!.bounds)
+        webView.autoresizingMask = [.width, .height]
+        webView.setValue(false, forKey: "drawsBackground")
+        panel.contentView?.addSubview(webView)
+
+        // The saved ledger shows at once; a fresh scan of every session follows and replaces it.
+        let saved = loadSpendLedger()
+        let price = codexCreditPrice
+        webView.loadHTMLString(
+            generateSpendHistoryHTML(ledger: saved.lastScan == nil ? nil : saved, pricePerCredit: price, scanning: true),
+            baseURL: nil
+        )
+        let includeCodex = codexTrackingEnabled
+        DispatchQueue.global(qos: .userInitiated).async { [weak panel, weak webView] in
+            let ledger = rescanSpendLedger(includeCodex: includeCodex)
+            DispatchQueue.main.async {
+                guard panel != nil, let webView else { return }
+                webView.loadHTMLString(
+                    generateSpendHistoryHTML(ledger: ledger, pricePerCredit: price, scanning: false), baseURL: nil)
+            }
+        }
+
+        panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        spendHistoryPanel = panel
+    }
+
+    /// Keeps the ledger ahead of Claude Code's transcript cleanup even if the panel is never opened.
+    func rescanSpendLedgerIfStale() {
+        guard !spendLedgerScanInFlight else { return }
+        if let lastScan = loadSpendLedger().lastScan, Date().timeIntervalSince(lastScan) < spendLedgerRescanInterval {
+            return
+        }
+        spendLedgerScanInFlight = true
+        let includeCodex = codexTrackingEnabled
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            rescanSpendLedger(includeCodex: includeCodex)
+            DispatchQueue.main.async { self?.spendLedgerScanInFlight = false }
+        }
+    }
+
     @objc func recordHotkey() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -928,6 +991,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         if !hasData {
             statusItem.button?.title = "..."
         }
+        rescanSpendLedgerIfStale()
 
         // Both providers are fetched together so status item ownership is resolved
         // from one consistent pair of readings.
@@ -1205,6 +1269,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         if let extra = usage.extra_usage, extra.is_enabled, let used = extra.used_credits {
             let label = categoryLabel(for: "extra_usage")
             let spendText = ExtraUsageFormatter.formatCredits(used, decimalPlaces: extra.decimal_places)
+            let dollars = used / pow(10.0, Double(max(extra.decimal_places ?? 2, 0)))
+            DispatchQueue.global(qos: .utility).async { recordClaudeExtraSpend(dollars: dollars) }
             usageItems["extra_usage"]?.title = "\(label): \(spendText)"
             usageItems["extra_usage"]?.attributedTitle = tabbedMenuItemString("\(label): \(spendText)", "")
             if let util = extra.utilization {

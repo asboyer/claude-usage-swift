@@ -29,7 +29,7 @@ let package = Package(
             ],
             sources: [
                 "UsageCore.swift", "CodexUsageCore.swift", "CodexOverageCore.swift", "OpencodeUsageCore.swift",
-                "KeychainCredentials.swift", "UsageBreakdownCore.swift",
+                "KeychainCredentials.swift", "UsageBreakdownCore.swift", "SpendHistoryCore.swift",
                 "ClaudeCodeTranscripts.swift",
             ]
         ),

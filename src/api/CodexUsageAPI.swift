@@ -297,3 +297,15 @@ private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: 
     }
     return files
 }
+
+/// Every model request and limit reading in local sessions touched since `cutoff`, uncached:
+/// the history scan runs rarely and reaches back further than any overage period.
+func scanCodexSessions(modifiedSince cutoff: Date) -> (requests: [CodexModelRequest], readings: [CodexLimitReading]) {
+    var parser = CodexSessionParser()
+    for (url, _, _) in codexSessionFiles(modifiedSince: cutoff) {
+        for line in LineReader(url: url) {
+            parser.consume(line: line)
+        }
+    }
+    return (parser.requests, parser.readings)
+}
