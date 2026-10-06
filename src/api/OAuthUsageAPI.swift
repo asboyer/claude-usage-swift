@@ -14,7 +14,12 @@ var lastRequestForDebug: String?
 var lastResponseForDebug: String?
 var lastUserAgentForDebug: String?
 
+private var cachedOAuthToken: String?
+
+/// Reads the keychain once and reuses the token until the API rejects it, so a keychain
+/// access prompt appears at most once per token refresh instead of on every poll.
 func getOAuthToken() -> String? {
+    if let cachedOAuthToken { return cachedOAuthToken }
     guard
         let json = keychainPassword(service: "Claude Code-credentials"),
         let jsonData = json.data(using: .utf8),
@@ -24,6 +29,7 @@ func getOAuthToken() -> String? {
     else {
         return nil
     }
+    cachedOAuthToken = token
     return token
 }
 
@@ -55,7 +61,10 @@ func fetchUsage(token: String, completion: @escaping (UsageResponse?, _ rateLimi
         lastRequestForDebug = String(data: requestData, encoding: .utf8)
     }
 
-    URLSession(configuration: .ephemeral).dataTask(with: request) { data, _, _ in
+    URLSession(configuration: .ephemeral).dataTask(with: request) { data, response, _ in
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            cachedOAuthToken = nil
+        }
         guard let data else {
             completion(nil, false)
             return
