@@ -75,24 +75,30 @@ private func runGit(_ args: [String], in clone: String) -> String? {
     return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-/// Reads the clone's branch, uncommitted changes, and upstream, and whether the build already
-/// contains `latestHash`. Blocks; call off the main thread.
+/// Reads the clone's branch and uncommitted changes, the upstream of its local `updateBranch`, and
+/// whether the build already contains `latestHash`. Blocks; call off the main thread.
 /// Nil when the clone is gone or is not a git checkout.
-func inspectClone(at clone: String, builtHash: String, latestHash: String) -> CloneState? {
+func inspectClone(at clone: String, updateBranch: String, builtHash: String, latestHash: String)
+    -> CloneState?
+{
     guard runGit(["rev-parse", "--is-inside-work-tree"], in: clone) == "true" else { return nil }
     let branch = runGit(["symbolic-ref", "--short", "-q", "HEAD"], in: clone)
     let status = runGit(["status", "--porcelain", "--untracked-files=no"], in: clone)
 
+    // The install pulls the local update branch, so its upstream matters, not the current branch's.
+    // A missing local branch has no config, which reads as not tracking upstream.
     var remoteURL: String?
-    var upstreamBranch: String?
-    if let branch {
-        if let remote = runGit(["config", "--get", "branch.\(branch).remote"], in: clone) {
-            remoteURL = runGit(["remote", "get-url", remote], in: clone)
-        }
-        upstreamBranch = runGit(["config", "--get", "branch.\(branch).merge"], in: clone)
-            .flatMap(UpdateCore.branchName(fromMergeRef:))
+    if let remote = runGit(["config", "--get", "branch.\(updateBranch).remote"], in: clone) {
+        remoteURL = runGit(["remote", "get-url", remote], in: clone)
     }
-    let unpushed = runGit(["rev-list", "--count", "@{upstream}..HEAD"], in: clone).flatMap { Int($0) }
+    let upstreamBranch = runGit(["config", "--get", "branch.\(updateBranch).merge"], in: clone)
+        .flatMap(UpdateCore.branchName(fromMergeRef:))
+    // `@{upstream}` needs the short branch name; `refs/heads/<name>@{upstream}` is an error.
+    let upstreamRef = "\(updateBranch)@{upstream}"
+    let unpushed = runGit(["rev-list", "--count", "\(upstreamRef)..refs/heads/\(updateBranch)"], in: clone)
+        .flatMap { Int($0) }
+    let notOnUpdateBranch = runGit(["rev-list", "--count", "\(upstreamRef)..HEAD"], in: clone)
+        .flatMap { Int($0) }
     // Exits 0 only when latestHash is an ancestor of (or equal to) builtHash. An unknown commit
     // exits non-zero, which falls back to treating the latest commit as new.
     let buildIncludesLatest =
@@ -105,18 +111,40 @@ func inspectClone(at clone: String, builtHash: String, latestHash: String) -> Cl
         upstreamRemoteURL: remoteURL,
         upstreamBranch: upstreamBranch,
         unpushedCommitCount: unpushed,
+        commitsNotOnUpdateBranch: notOnUpdateBranch,
         buildIncludesLatest: buildIncludesLatest
     )
 }
 
 // MARK: - Installing
 
+/// $1 is the clone, $2 the update branch. Returns to the branch, or on a detached HEAD the commit,
+/// that was checked out. Exits non-zero if any step failed, including switching back, so the app
+/// reports it.
+private let installScript = #"""
+    cd "$1" || exit 1
+    original=$(git symbolic-ref --short -q HEAD || git rev-parse HEAD) || exit 1
+    if [ "$original" != "$2" ]; then
+        echo "Switching from $original to $2"
+        git checkout --quiet "$2" || exit 1
+    fi
+    git pull --ff-only && ./update.sh
+    status=$?
+    if [ "$original" != "$2" ]; then
+        echo "Switching back to $original"
+        git checkout --quiet "$original" || status=1
+    fi
+    exit $status
+    """#
+
 let updateLogURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/ClaudeUsage/update.log")
 
-/// Starts `git pull --ff-only && ./update.sh` in the clone as its own process, so it outlives this
-/// app when update.sh quits it. Output goes to `updateLogURL`. `onFailure` runs on the main queue
-/// if the process exits non-zero; on success update.sh has already quit and replaced this app.
+/// Runs the install in the clone as its own process, so it outlives this app when update.sh quits
+/// it: switch to the update branch if needed, `git pull --ff-only`, `./update.sh`, then switch back
+/// to the branch the clone was on, whether or not the update worked. Output goes to
+/// `updateLogURL`. `onFailure` runs on the main queue if the process exits non-zero; on success
+/// update.sh has already quit and replaced this app.
 func startUpdateInstall(source: BuildSource, onFailure: @escaping () -> Void) -> Bool {
     let fileManager = FileManager.default
     try? fileManager.createDirectory(
@@ -129,10 +157,8 @@ func startUpdateInstall(source: BuildSource, onFailure: @escaping () -> Void) ->
 
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    // The clone path is passed as $1, never spliced into the script text.
-    process.arguments = [
-        "-c", #"cd "$1" && git pull --ff-only && ./update.sh"#, "claude-usage-update", source.clonePath,
-    ]
+    // The clone path and branch are passed as $1 and $2, never spliced into the script text.
+    process.arguments = ["-c", installScript, "claude-usage-update", source.clonePath, source.updateBranch]
     var environment = ProcessInfo.processInfo.environment
     // The rebuilt app keeps checking the branch this one checks.
     environment["CLAUDEUSAGE_UPDATE_BRANCH"] = source.updateBranch

@@ -7,23 +7,28 @@ import Foundation
 struct CloneState: Equatable {
     /// Checked-out branch, or nil on a detached HEAD.
     let branch: String?
-    /// Modified or staged tracked files. Untracked files do not block a fast-forward pull.
+    /// Modified or staged tracked files. Untracked files do not block a checkout or a pull.
     let hasUncommittedChanges: Bool
-    /// Remote and branch the checked-out branch pulls from, or nil when it has no upstream.
+    /// Remote and branch the local update branch (normally `master`) pulls from, or nil when
+    /// that branch has no upstream or does not exist locally. Read for the update branch, not the
+    /// checked-out one, because the install switches to the update branch before pulling.
     let upstreamRemoteURL: String?
     let upstreamBranch: String?
-    /// Commits on HEAD that the upstream branch lacks, or nil when that could not be counted.
+    /// Commits on the local update branch that its upstream lacks, or nil when that could not be
+    /// counted.
     let unpushedCommitCount: Int?
+    /// Commits on the checked-out HEAD that the update branch's upstream lacks, as of the clone's
+    /// last fetch. When the clone is on another branch, these are what the new build leaves out.
+    let commitsNotOnUpdateBranch: Int?
     /// The latest upstream commit is already part of the commit this app was built from, as when
     /// the app was built from a branch ahead of master. False when git can't tell, for example
     /// because the clone hasn't fetched that commit yet.
     let buildIncludesLatest: Bool
 }
 
-/// Why the app won't pull into the clone itself.
+/// Why the app won't install into the clone itself.
 enum CloneBlockReason: Equatable {
-    case detachedHead
-    case otherBranch(String)
+    /// The clone can't cleanly switch branches and back. The only reason that opens Finder.
     case uncommittedChanges
     case unpushedCommits
     /// Pulls from a fork, another branch, or nothing.
@@ -35,11 +40,12 @@ enum CloneBlockReason: Equatable {
 /// What the menu should offer once the latest upstream commit is known.
 enum UpdateStatus: Equatable {
     case upToDate
-    /// `git pull --ff-only && ./update.sh` in the clone will land on the upstream commit.
+    /// Switching the clone to the update branch, `git pull --ff-only`, and `./update.sh` will build
+    /// the upstream commit, and the clone can then switch back.
     case installable
-    /// A newer commit exists, but pulling in this clone could fail or leave the build unchanged,
-    /// so the app only points at the clone.
-    case cloneHasLocalChanges
+    /// A newer commit exists, but the app can't install it into this clone without risking the
+    /// user's work or building the wrong commit.
+    case blocked(CloneBlockReason)
 }
 
 enum UpdateCore {
@@ -84,47 +90,59 @@ enum UpdateCore {
         if builtHash.lowercased() == latestHash.lowercased() || clone.buildIncludesLatest {
             return .upToDate
         }
-        return blockReason(clone: clone, branch: branch) == nil ? .installable : .cloneHasLocalChanges
+        return blockReason(clone: clone, branch: branch).map(UpdateStatus.blocked) ?? .installable
     }
 
-    /// The first reason `git pull --ff-only` in the clone would not land on the latest `branch`
-    /// commit, or nil when it would.
+    /// The first reason the install could not switch to `branch`, fast-forward it to the latest
+    /// commit, and switch back; nil when it can. Being on another branch, or on no branch, is not
+    /// a reason: the install returns to whatever was checked out.
     static func blockReason(clone: CloneState, branch: String) -> CloneBlockReason? {
-        guard let current = clone.branch else { return .detachedHead }
-        if current != branch { return .otherBranch(current) }
         if clone.hasUncommittedChanges { return .uncommittedChanges }
         if clone.upstreamBranch != branch || clone.upstreamRemoteURL.map(isUpstreamRepoURL) != true {
             return .notTrackingUpstream
         }
-        // Unpushed commits mean the pull is a no-op and the rebuild reproduces this build.
+        // Unpushed commits on the update branch mean a fast-forward pull can't land on upstream.
         // A count git could not produce (nil) is treated the same, so that clone is never pulled.
         if clone.unpushedCommitCount != 0 { return .unpushedCommits }
         return nil
     }
 
-    /// Says in plain words why the app left the clone alone, and what to do instead.
-    static func blockedMessage(reason: CloneBlockReason, clonePath: String, branch: String) -> String {
-        let repo = "\(repoOwner)/\(repoName)"
-        let problem: String
+    /// Why the app left the clone alone, and what to do: one short line each.
+    static func blockedMessage(reason: CloneBlockReason, branch: String) -> String {
         switch reason {
-        case .detachedHead:
-            problem = "Your clone at \(clonePath) isn't on a branch, so the app won't pull into it."
-        case .otherBranch(let current):
-            problem =
-                "Your clone at \(clonePath) is on the \(current) branch, not \(branch), "
-                + "so the app won't switch branches for you."
         case .uncommittedChanges:
-            problem = "Your clone at \(clonePath) has uncommitted changes, so the app won't pull into it."
+            return "Your clone has uncommitted changes.\nCommit or stash them, then check again."
         case .unpushedCommits:
-            problem =
-                "Your clone at \(clonePath) has commits that aren't on \(repo), "
-                + "so pulling wouldn't change the app."
+            return "Your local \(branch) has commits that aren't on GitHub.\n"
+                + "Update it yourself, then run ./update.sh."
         case .notTrackingUpstream:
-            problem =
-                "Your clone at \(clonePath) doesn't pull \(branch) from \(repo) "
-                + "(it may be a fork), so pulling wouldn't get this update."
+            return "Your local \(branch) is missing or tracks a fork.\n"
+                + "Update it yourself, then run ./update.sh."
         }
-        return problem + " Update the clone yourself, then run ./update.sh."
+    }
+
+    /// What Install will do, one short line each. From another branch it also says what the new
+    /// app leaves out, since it is built from `branch`.
+    static func installMessage(clone: CloneState, branch: String) -> String {
+        if clone.branch == branch {
+            return "Claude Usage will pull the latest \(branch), rebuild, and restart."
+        }
+        var lines = [
+            "Claude Usage will rebuild from \(branch) and restart.",
+            "Your clone switches to \(branch), then back to \(clone.branch ?? "the current commit").",
+        ]
+        let source = clone.branch.map { "on \($0)" } ?? "not on \(branch)"
+        switch clone.commitsNotOnUpdateBranch {
+        case 0:
+            break
+        case 1:
+            lines.append("1 commit \(source) won't be in the new app.")
+        case .some(let count):
+            lines.append("\(count) commits \(source) won't be in the new app.")
+        case nil:
+            lines.append("Commits \(source) won't be in the new app.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// The menu row for a status, or nil when there is nothing to offer.
@@ -132,7 +150,8 @@ enum UpdateCore {
         switch status {
         case .upToDate: return nil
         case .installable: return "Update available — click to install"
-        case .cloneHasLocalChanges: return "Update available (clone has local changes)"
+        case .blocked(.uncommittedChanges): return "Update available (clone has local changes)"
+        case .blocked: return "Update available (can't install automatically)"
         }
     }
 
