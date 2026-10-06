@@ -359,7 +359,7 @@ enum CodexOverageCore {
 
     /// Whole percent, with "<1%" so a small but real share does not read as none.
     static func formatShare(_ share: Double) -> String {
-        if share > 0 && share < 0.005 { return "<1%" }
+        if share > 0 && share <= 0.005 { return "<1%" }
         return String(format: "%.0f%%", share * 100)
     }
 

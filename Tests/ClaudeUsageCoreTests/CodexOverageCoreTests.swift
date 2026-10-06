@@ -243,6 +243,7 @@ struct CodexOverageCoreTests {
         #expect(CodexOverageCore.formatShare(0.3) == "30%")
         #expect(CodexOverageCore.formatShare(0.996) == "100%")
         #expect(CodexOverageCore.formatShare(0.001) == "<1%")
+        #expect(CodexOverageCore.formatShare(0.005) == "<1%")
         #expect(CodexOverageCore.formatShare(0) == "0%")
     }
 
