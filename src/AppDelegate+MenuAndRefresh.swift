@@ -113,6 +113,48 @@ extension AppDelegate {
         codexTrackingItem.state = codexTrackingEnabled ? .on : .off
         settingsMenu.addItem(codexTrackingItem)
 
+        // Codex Credit Price submenu — prices the Codex overage estimate
+        let creditPriceMenu = NSMenu()
+        codexCreditPriceItems = CodexOverageCore.pricePresets.map { price in
+            let formatted = CodexOverageCore.formatPrice(price)
+            let title = price == CodexOverageCore.defaultPricePerCredit ? "\(formatted) (OpenAI list price)" : formatted
+            let item = NSMenuItem(title: title, action: #selector(selectCodexCreditPrice(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = price
+            creditPriceMenu.addItem(item)
+            return item
+        }
+        creditPriceMenu.addItem(NSMenuItem.separator())
+        codexCreditPriceCustomItem = NSMenuItem(
+            title: "Custom…", action: #selector(enterCustomCodexCreditPrice), keyEquivalent: ""
+        )
+        codexCreditPriceCustomItem.target = self
+        creditPriceMenu.addItem(codexCreditPriceCustomItem)
+        let creditPriceItem = NSMenuItem(title: "Codex Credit Price", action: nil, keyEquivalent: "")
+        creditPriceItem.submenu = creditPriceMenu
+        settingsMenu.addItem(creditPriceItem)
+
+        showCodexCreditsItem = NSMenuItem(
+            title: "Show Codex Credits", action: #selector(toggleShowCodexCredits), keyEquivalent: ""
+        )
+        showCodexCreditsItem.target = self
+        showCodexCreditsItem.state = showCodexCredits ? .on : .off
+        settingsMenu.addItem(showCodexCreditsItem)
+
+        // Codex Extra Usage Window submenu — how far back the Codex Extra row counts
+        let overagePeriodMenu = NSMenu()
+        codexOveragePeriodItems = CodexOveragePeriod.allCases.map { period in
+            let title = period == .defaultPeriod ? "\(period.menuTitle) (default)" : period.menuTitle
+            let item = NSMenuItem(title: title, action: #selector(selectCodexOveragePeriod(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = period.rawValue
+            overagePeriodMenu.addItem(item)
+            return item
+        }
+        let overagePeriodItem = NSMenuItem(title: "Codex Extra Usage Window", action: nil, keyEquivalent: "")
+        overagePeriodItem.submenu = overagePeriodMenu
+        settingsMenu.addItem(overagePeriodItem)
+
         cursorTrackingItem = NSMenuItem(
             title: "Track Cursor Usage",
             action: #selector(toggleCursorTracking),
@@ -316,6 +358,8 @@ extension AppDelegate {
         updateNotificationMenu()
         updateAlarmMenu()
         updateSoundMenu()
+        updateCodexCreditPriceMenu()
+        updateCodexOveragePeriodMenu()
     }
 
     func rebuildMenu() {
@@ -943,6 +987,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             guard let self else { return }
             self.updateUI(usage: claudeUsage, rateLimited: claudeRateLimited)
             self.updateCodexUI(codexUsage)
+            self.refreshCodexOverage(codexUsage)
             self.updateCursorUI(cursorUsage)
             self.updateOpencodeUI(opencodeUsageResult)
             self.updateMenuBarOwnership(
@@ -1250,11 +1295,14 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         guard codexTrackingEnabled, let weekly = usage?.weekly else {
             codexAvailable = false
             codexStatusText = nil
+            codexStatusWindow = nil
+            codexOverage = nil
             for key in codexCategoryKeys {
                 usageItems[key]?.title = "\(categoryLabel(for: key)): --"
                 usageItems[key]?.attributedTitle = nil
                 rateItems[key]?.isHidden = true
             }
+            usageItems[codexExtraKey]?.isHidden = true
             rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: codexAvailable)
             return
         }
@@ -1273,12 +1321,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
 
         // The menu bar tracks the session window, matching how Claude usage is displayed,
         // and falls back to weekly on plans that report no session limit.
-        let statusWindow = usage?.fiveHour ?? weekly
-        if statusWindow.hasExpired {
-            codexStatusText = "--"
-        } else {
-            codexStatusText = statusText(percent: statusWindow.usedPercent, resetsAt: statusWindow.resetsAt)
-        }
+        codexStatusWindow = usage?.fiveHour ?? weekly
+        codexStatusText = currentCodexStatusText()
 
         rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: codexAvailable)
     }
@@ -1303,6 +1347,201 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         )
         let windowSeconds = window.windowSeconds > 0 ? window.windowSeconds : defaultWindowSeconds
         updateUsageItem(key: key, limit: limit, windowSeconds: windowSeconds)
+    }
+
+    /// Scans local Codex sessions off the main thread, since the first scan of a busy week
+    /// reads hundreds of megabytes; the row updates whenever the estimate lands.
+    func refreshCodexOverage(_ usage: CodexUsage?) {
+        guard codexTrackingEnabled, let usage else { return }
+        lastCodexUsage = usage
+        let period = codexOveragePeriod
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let estimate = estimateCodexOverage(usage: usage, period: period)
+            DispatchQueue.main.async {
+                guard let self, self.codexTrackingEnabled, self.codexAvailable else { return }
+                // A scan started before the window setting changed would show the wrong period.
+                guard period == self.codexOveragePeriod else { return }
+                self.codexOverage = estimate
+                self.updateCodexStatusDisplayMode()
+                self.codexStatusText = self.currentCodexStatusText()
+                self.updateCodexExtraItem()
+                self.updateStatusItemTitle()
+            }
+        }
+    }
+
+    /// Same rule as Claude's Extra spend: the estimate takes the menu bar as soon as it grows, and
+    /// hands it back once the session percentage moves again.
+    private func updateCodexStatusDisplayMode() {
+        let spent = codexOverage.flatMap { $0.credits > 0 ? $0.credits : nil }
+        if let window = codexStatusWindow {
+            codexStatusDisplayMode = StatusDisplayModeSelector.select(
+                previous: codexStatusDisplayMode,
+                fiveHourUtilization: window.usedPercent,
+                previousFiveHourUtilization: previousCodexStatusUtilization,
+                spentCredits: spent,
+                previousSpentCredits: previousCodexOverageCredits
+            )
+            previousCodexStatusUtilization = window.usedPercent
+        }
+        previousCodexOverageCredits = spent
+    }
+
+    /// Like Claude, a spent window shows the estimated overage in dollars rather than its reset
+    /// time, as does any window while the estimate is growing.
+    func currentCodexStatusText() -> String? {
+        guard let window = codexStatusWindow else { return nil }
+        if window.hasExpired { return "--" }
+        if let overage = codexOverage, overage.credits > 0,
+            codexStatusDisplayMode == .overage || window.usedPercent >= 100
+        {
+            return "~" + CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
+        }
+        return statusText(percent: window.usedPercent, resetsAt: window.resetsAt)
+    }
+
+    /// Shows the estimated spend past Codex's limits in the chosen period, hidden until there is
+    /// some. Its submenu spells out the period and splits the spend by model.
+    func updateCodexExtraItem() {
+        guard let item = usageItems[codexExtraKey] else { return }
+        guard let overage = codexOverage, overage.credits > 0 else {
+            item.isHidden = true
+            item.submenu = nil
+            return
+        }
+        let label = categoryLabel(for: codexExtraKey)
+        let dollars = CodexOverageCore.formatDollars(overage.dollars(pricePerCredit: codexCreditPrice))
+        let suffix = overage.period.rowSuffix
+        // Credits are OpenAI's billing unit; dollars alone read like Claude's Extra row.
+        let detail = showCodexCredits ? "\(CodexOverageCore.formatCredits(overage.credits)) \(suffix)" : suffix
+        item.title = "\(label): ~\(dollars) (\(detail))"
+        item.attributedTitle = tabbedMenuItemString("\(label): ~\(dollars)", detail)
+        item.submenu = codexOverageBreakdownMenu(overage)
+        item.isHidden = false
+    }
+
+    private func codexOverageBreakdownMenu(_ overage: CodexOverageEstimate) -> NSMenu {
+        let submenu = NSMenu()
+        let periodText = CodexOverageCore.formatPeriod(overage)
+        let period = NSMenuItem(title: periodText, action: nil, keyEquivalent: "")
+        period.isEnabled = false
+        period.attributedTitle = dimmedMenuItemString(periodText)
+        submenu.addItem(period)
+        submenu.addItem(NSMenuItem.separator())
+
+        var rowWidths = [period.attributedTitle?.size().width ?? 0]
+        for model in overage.models {
+            let dollars = CodexOverageCore.formatDollars(model.dollars(pricePerCredit: codexCreditPrice))
+            let credits = CodexOverageCore.formatCredits(model.credits)
+            let title = showCodexCredits ? "\(model.model): ~\(dollars) (\(credits))" : "\(model.model): ~\(dollars)"
+            let row = NSMenuItem(title: title, action: #selector(noop), keyEquivalent: "")
+            row.target = self
+            row.attributedTitle = tabbedMenuItemString(
+                model.model, showCodexCredits ? "~\(dollars)  \(credits)" : "~\(dollars)")
+            submenu.addItem(row)
+            rowWidths.append(row.attributedTitle?.size().width ?? 0)
+        }
+
+        submenu.addItem(NSMenuItem.separator())
+        var footer = "\(overage.overageRequests) model requests past the limit"
+        if overage.unpricedRequests > 0 {
+            footer += ", \(overage.unpricedRequests) more on models without a published rate"
+        }
+        let info =
+            "Estimated from the tokens Codex logged on this Mac for each model request sent while "
+            + "a 5-hour or weekly limit was at 100%, during the period shown at the top "
+            + "(Settings › Codex Extra Usage Window). Priced "
+            + "with OpenAI's Codex credit rates at \(CodexOverageCore.formatPrice(codexCreditPrice)) per "
+            + "credit (Settings › Codex Credit Price). Codex Cloud tasks and other devices are not included."
+        submenu.addItem(infoFooterItem(footer, info: info, alignedTo: rowWidths.max() ?? 0))
+        return submenu
+    }
+
+    /// A dimmed footer line ending in an ⓘ at the menu's trailing edge. Hovering the line shows
+    /// `info`; the row stays a native menu item so its text lines up with the rows above it.
+    private func infoFooterItem(_ text: String, info: String, alignedTo rowWidth: CGFloat) -> NSMenuItem {
+        let font = NSFont.menuFont(ofSize: 14)
+        let textWidth = (text as NSString).size(withAttributes: [.font: font]).width
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: max(rowWidth, textWidth + 32), options: [:])]
+        let title = NSAttributedString(
+            string: "\(text)\t\u{24D8}",
+            attributes: [
+                .paragraphStyle: paragraph,
+                .font: font,
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        // Enabled like the model rows, so the tooltip shows on hover.
+        let item = NSMenuItem(title: text, action: #selector(noop), keyEquivalent: "")
+        item.target = self
+        item.attributedTitle = title
+        item.toolTip = info
+        return item
+    }
+
+    func updateCodexCreditPriceMenu() {
+        var matchedPreset = false
+        for item in codexCreditPriceItems {
+            guard let price = item.representedObject as? Double else { continue }
+            let isSelected = abs(price - codexCreditPrice) < 1e-9
+            item.state = isSelected ? .on : .off
+            matchedPreset = matchedPreset || isSelected
+        }
+        codexCreditPriceCustomItem?.state = matchedPreset ? .off : .on
+        codexCreditPriceCustomItem?.title =
+            matchedPreset ? "Custom…" : "Custom (\(CodexOverageCore.formatPrice(codexCreditPrice)))…"
+    }
+
+    @objc func toggleShowCodexCredits() {
+        showCodexCredits = !showCodexCredits
+    }
+
+    func updateCodexOveragePeriodMenu() {
+        for item in codexOveragePeriodItems {
+            item.state = item.representedObject as? String == codexOveragePeriod.rawValue ? .on : .off
+        }
+    }
+
+    @objc func selectCodexOveragePeriod(_ sender: NSMenuItem) {
+        guard
+            let raw = sender.representedObject as? String,
+            let period = CodexOveragePeriod(rawValue: raw)
+        else { return }
+        codexOveragePeriod = period
+    }
+
+    @objc func selectCodexCreditPrice(_ sender: NSMenuItem) {
+        guard let price = sender.representedObject as? Double else { return }
+        codexCreditPrice = price
+    }
+
+    @objc func enterCustomCodexCreditPrice() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { NSApp.setActivationPolicy(.accessory) }
+
+        let alert = NSAlert()
+        alert.messageText = "Codex Credit Price"
+        alert.informativeText =
+            "Dollars per Codex credit, used to price the overage estimate. "
+            + "OpenAI sells credits at $0.04 each (1,000 for $40); workspace pricing can differ."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        field.stringValue = String(CodexOverageCore.formatPrice(codexCreditPrice).dropFirst())
+        field.placeholderString = "0.04"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let price = CodexOverageCore.parsePricePerCredit(field.stringValue) else {
+            let invalid = NSAlert()
+            invalid.messageText = "Invalid price"
+            invalid.informativeText = "Enter a dollar amount between 0 and 10, such as 0.04."
+            invalid.runModal()
+            return
+        }
+        codexCreditPrice = price
     }
 
     /// Dashes stand in for a rolled-over window so the last reading is not mistaken for a live one.

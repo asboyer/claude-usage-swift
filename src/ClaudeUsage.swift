@@ -116,6 +116,55 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var codexTrackingItem: NSMenuItem!
 
+    // Dollars per Codex credit, used to price the overage estimate.
+    var codexCreditPrice: Double = CodexOverageCore.defaultPricePerCredit {
+        didSet {
+            UserDefaults.standard.set(codexCreditPrice, forKey: "codexCreditPrice")
+            updateCodexCreditPriceMenu()
+            updateCodexExtraItem()
+            if menuReady {
+                codexStatusText = currentCodexStatusText()
+                updateStatusItemTitle()
+            }
+        }
+    }
+    var codexCreditPriceItems: [NSMenuItem] = []
+
+    // Whether the Codex Extra row lists credits beside its dollar estimate.
+    var showCodexCredits: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showCodexCredits, forKey: "showCodexCredits")
+            showCodexCreditsItem?.state = showCodexCredits ? .on : .off
+            updateCodexExtraItem()
+        }
+    }
+    var showCodexCreditsItem: NSMenuItem!
+    var codexCreditPriceCustomItem: NSMenuItem!
+
+    // How far back the Codex Extra row counts overage.
+    var codexOveragePeriod: CodexOveragePeriod = .defaultPeriod {
+        didSet {
+            UserDefaults.standard.set(codexOveragePeriod.rawValue, forKey: "codexOveragePeriod")
+            updateCodexOveragePeriodMenu()
+            guard menuReady, codexOveragePeriod != oldValue else { return }
+            // A longer period holds more credits, which must not read as new spend in the menu bar.
+            previousCodexOverageCredits = nil
+            refreshCodexOverage(lastCodexUsage)
+        }
+    }
+    var codexOveragePeriodItems: [NSMenuItem] = []
+
+    // Credits Codex drew past its limits in the chosen period, estimated from local sessions,
+    // and the Codex reading it was estimated against.
+    var codexOverage: CodexOverageEstimate?
+    var lastCodexUsage: CodexUsage?
+
+    // Codex's menu bar reading and whether its overage estimate currently owns that text.
+    var codexStatusWindow: CodexRateWindow?
+    var codexStatusDisplayMode: StatusDisplayMode = .percentage
+    var previousCodexStatusUtilization: Double?
+    var previousCodexOverageCredits: Double?
+
     // Cursor usage tracking
     var cursorTrackingEnabled: Bool = true {
         didSet {
@@ -254,6 +303,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ud.object(forKey: "codexTrackingEnabled") != nil {
             codexTrackingEnabled = ud.bool(forKey: "codexTrackingEnabled")
         }
+        if let savedPrice = ud.object(forKey: "codexCreditPrice") as? Double, savedPrice > 0 {
+            codexCreditPrice = savedPrice
+        }
+        if ud.object(forKey: "showCodexCredits") != nil {
+            showCodexCredits = ud.bool(forKey: "showCodexCredits")
+        }
+        if let savedPeriod = ud.string(forKey: "codexOveragePeriod").flatMap(CodexOveragePeriod.init(rawValue:)) {
+            codexOveragePeriod = savedPeriod
+        }
         if ud.object(forKey: "cursorTrackingEnabled") != nil {
             cursorTrackingEnabled = ud.bool(forKey: "cursorTrackingEnabled")
         }
@@ -274,6 +332,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 restored.insert("codex_five_hour")
                 ud.set(true, forKey: "codexFiveHourPinMigrated")
             }
+            // The Codex overage estimate arrived after both Codex pin migrations.
+            if !ud.bool(forKey: "codexExtraPinMigrated") {
+                restored.insert(codexExtraKey)
+                ud.set(true, forKey: "codexExtraPinMigrated")
+            }
             // Existing installs predate the Cursor category, so pin it once on upgrade.
             if !ud.bool(forKey: "cursorPinMigrated") {
                 restored.formUnion(cursorCategoryKeys)
@@ -289,6 +352,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             ud.set(true, forKey: "codexPinMigrated")
             ud.set(true, forKey: "codexFiveHourPinMigrated")
+            ud.set(true, forKey: "codexExtraPinMigrated")
             ud.set(true, forKey: "cursorPinMigrated")
             ud.set(true, forKey: "scopedWeeklyPinMigrated")
         }
@@ -302,10 +366,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let label = categoryLabel(for: key)
             let item = NSMenuItem(title: "\(label): ...", action: #selector(noop), keyEquivalent: "")
             item.target = self
-            // The scoped weekly row only applies to plans with a per-model weekly limit;
-            // stay hidden until a fetch reports one.
-            item.isHidden = key == scopedWeeklyKey
+            // The scoped weekly row only applies to plans with a per-model weekly limit, and the
+            // Codex overage row only to spend past a limit; both stay hidden until a fetch has one.
+            item.isHidden = key == scopedWeeklyKey || key == codexExtraKey
             usageItems[key] = item
+
+            // An estimate in dollars has no utilization rate, and Rate Insight would otherwise
+            // reveal an empty row beneath it.
+            guard key != codexExtraKey else { continue }
 
             let rateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             rateItem.isEnabled = false

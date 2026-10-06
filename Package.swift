@@ -28,7 +28,7 @@ let package = Package(
                 "history"
             ],
             sources: [
-                "UsageCore.swift", "CodexUsageCore.swift", "OpencodeUsageCore.swift",
+                "UsageCore.swift", "CodexUsageCore.swift", "CodexOverageCore.swift", "OpencodeUsageCore.swift",
                 "KeychainCredentials.swift", "UsageBreakdownCore.swift",
                 "ClaudeCodeTranscripts.swift",
             ]
