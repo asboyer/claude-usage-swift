@@ -1437,11 +1437,14 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             return (model: model.model, spend: spend, share: CodexOverageCore.formatShare(overage.tokenShare(of: model)))
         }
         // The token share sits right-aligned past the widest spend, so cost and usage read side by side.
-        let widestSpend = rows.map { ($0.spend as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        // Long model names push the spend column right instead of running into it.
+        let spendColumn = max(140, (rows.map { width($0.model) }.max() ?? 0) + 16)
+        let widestSpend = rows.map { width($0.spend) }.max() ?? 0
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = [
-            NSTextTab(textAlignment: .left, location: 140, options: [:]),
-            NSTextTab(textAlignment: .right, location: 140 + widestSpend + 64, options: [:]),
+            NSTextTab(textAlignment: .left, location: spendColumn, options: [:]),
+            NSTextTab(textAlignment: .right, location: spendColumn + widestSpend + 64, options: [:]),
         ]
 
         var rowWidths = [period.attributedTitle?.size().width ?? 0]
@@ -1470,7 +1473,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             "Estimated from the tokens Codex logged on this Mac for each model request sent while "
             + "a 5-hour or weekly limit was at 100%, during the period shown at the top "
             + "(Settings › Codex Extra Usage Window). The percentage is each model's share of those "
-            + "tokens. Priced "
+            + "tokens, cached input included, so a model that mostly reads from cache can show a large "
+            + "share for little spend. Priced "
             + "with OpenAI's Codex credit rates at \(CodexOverageCore.formatPrice(codexCreditPrice)) per "
             + "credit (Settings › Codex Credit Price). Codex Cloud tasks and other devices are not included."
         submenu.addItem(infoFooterItem(footer, info: info, alignedTo: rowWidths.max() ?? 0))
