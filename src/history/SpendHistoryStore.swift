@@ -14,11 +14,14 @@ func loadSpendLedger() -> SpendLedger {
 }
 
 private func readSpendLedger() -> SpendLedger {
-    guard
-        let data = try? Data(contentsOf: spendLedgerURL),
-        let ledger = try? JSONDecoder().decode(SpendLedger.self, from: data)
-    else { return SpendLedger() }
-    return ledger
+    guard let data = try? Data(contentsOf: spendLedgerURL) else { return SpendLedger() }
+    if let ledger = try? JSONDecoder().decode(SpendLedger.self, from: data) { return ledger }
+    // History past Claude Code's 30-day transcript window exists only in this file, so an
+    // unreadable one is set aside for recovery rather than overwritten by the next write.
+    let aside = spendLedgerURL.deletingPathExtension()
+        .appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970)).json")
+    try? FileManager.default.moveItem(at: spendLedgerURL, to: aside)
+    return SpendLedger()
 }
 
 private func writeSpendLedger(_ ledger: SpendLedger) {
@@ -40,7 +43,7 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
     let claude = pending.compactMap(\.start).min().map { start in
         ClaudeCodeTranscripts.recentRequests(windowHours: Int(now.timeIntervalSince(start) / 3600) + 1, now: now)
     } ?? []
-    let codexCutoff = saved.lastScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0) } ?? .distantPast
+    let codexCutoff = saved.lastCodexScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0) } ?? .distantPast
     let codex = includeCodex ? scanCodexSessions(modifiedSince: codexCutoff) : (requests: [], readings: [])
     let codexExtra = SpendLedgerBuilder.codexDays(requests: codex.requests, readings: codex.readings)
     // Opencode keeps its own history, so it is always read in full.
@@ -58,6 +61,7 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
     ledger.merge(.codex, days: codexExtra)
     ledger.merge(.opencode, days: opencode)
     ledger.lastScan = now
+    if includeCodex { ledger.lastCodexScan = now }
     writeSpendLedger(ledger)
     return ledger
 }

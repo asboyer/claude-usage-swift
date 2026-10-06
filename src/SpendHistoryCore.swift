@@ -54,9 +54,13 @@ struct SpendLedger: Codable, Equatable {
     /// Claude increases not yet split across models; the next scan attributes them.
     var pendingClaudeExtra: [ClaudeExtraIncrease] = []
     var lastClaudeExtra: ClaudeExtraReading?
+    /// A reading below `lastClaudeExtra`, kept until the next one shows whether the total reset.
+    var claudeExtraDip: ClaudeExtraReading?
     /// When the app first read Claude's Extra total; Claude history starts here.
     var claudeTrackedSince: Date?
     var lastScan: Date?
+    /// Kept apart from `lastScan`: a provider switched on later needs its first scan in full.
+    var lastCodexScan: Date?
 
     /// Keeps, per day and model, whichever entry of `provider` covers more tokens. A scan only ever
     /// sees fewer tokens for a day than before once older session files have been deleted, or when
@@ -84,27 +88,47 @@ struct SpendLedger: Codable, Equatable {
         }
     }
 
-    /// Turns a new reading of Claude's monthly Extra total into an increase. The total resets each
-    /// month, so a reading in a new month, or one below the last, counts from zero.
+    /// Turns a new reading of Claude's monthly Extra total into an increase over the last one. The
+    /// API resets the total on its own schedule (UTC or billing date), so the local month alone
+    /// never marks a reset: a drop does, once the next reading confirms it.
     mutating func recordClaudeExtra(dollars: Double, at now: Date, calendar: Calendar = .current) {
-        let month = SpendLedgerBuilder.monthKey(now, calendar: calendar)
-        let previous = lastClaudeExtra
+        let reading = ClaudeExtraReading(at: now, dollars: dollars, month: SpendLedgerBuilder.monthKey(now, calendar: calendar))
         claudeTrackedSince = claudeTrackedSince ?? now
-        lastClaudeExtra = ClaudeExtraReading(at: now, dollars: dollars, month: month)
-        guard let previous, previous.month == month else {
-            // Without a reading near the reset, there is no telling when this month's spend happened.
-            let recent = previous.map { now.timeIntervalSince($0.at) < 3600 } ?? false
-            let start = recent ? calendar.dateInterval(of: .month, for: now)?.start : nil
-            if dollars > 0 {
-                pendingClaudeExtra.append(ClaudeExtraIncrease(start: start, end: now, dollars: dollars))
-            }
+        guard let previous = lastClaudeExtra else {
+            lastClaudeExtra = reading
+            // Spend billed before the first reading has no known window.
+            if dollars > 0 { pendingClaudeExtra.append(ClaudeExtraIncrease(start: nil, end: now, dollars: dollars)) }
             return
         }
-        // A drop within the month key is a reset that doesn't follow the local calendar month
-        // (UTC or billing date), so everything since the last reading is new spend.
-        let increase = dollars < previous.dollars ? dollars : dollars - previous.dollars
-        if increase > 0.005 {
-            pendingClaudeExtra.append(ClaudeExtraIncrease(start: previous.at, end: now, dollars: increase))
+        // Readings more than 36 hours apart across a month boundary straddle a reset in any time zone.
+        if previous.month != reading.month && now.timeIntervalSince(previous.at) > 36 * 3600 {
+            lastClaudeExtra = reading
+            claudeExtraDip = nil
+            if dollars > 0 { pendingClaudeExtra.append(ClaudeExtraIncrease(start: nil, end: now, dollars: dollars)) }
+            return
+        }
+        if dollars >= previous.dollars {
+            // A dip that the total climbs back from was a bad reading, not a reset.
+            claudeExtraDip = nil
+            lastClaudeExtra = reading
+            appendClaudeExtra(start: previous.at, end: now, dollars: dollars - previous.dollars)
+            return
+        }
+        guard let dip = claudeExtraDip else {
+            // Held back until the next reading, so one low response cannot recount the whole month.
+            claudeExtraDip = reading
+            return
+        }
+        // Two readings below the last good one: the total reset, and all of it since then is new spend.
+        appendClaudeExtra(start: previous.at, end: dip.at, dollars: dip.dollars)
+        appendClaudeExtra(start: dip.at, end: now, dollars: dollars - dip.dollars)
+        claudeExtraDip = nil
+        lastClaudeExtra = reading
+    }
+
+    private mutating func appendClaudeExtra(start: Date, end: Date, dollars: Double) {
+        if dollars > 0.005 {
+            pendingClaudeExtra.append(ClaudeExtraIncrease(start: start, end: end, dollars: dollars))
         }
     }
 }

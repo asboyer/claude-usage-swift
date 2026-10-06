@@ -50,24 +50,63 @@ struct SpendHistoryCoreTests {
         #expect(ledger.claudeTrackedSince == date("2026-10-05", hour: 9))
     }
 
-    @Test func claudeMonthlyResetCountsFromZero() {
+    @Test func claudeResetBeforeLocalMidnightIsNotCountedAgainAtTheMonthChange() {
+        // New York: the API resets at 20:00 on the 30th (UTC midnight), four hours before the local month.
         var ledger = SpendLedger()
-        ledger.recordClaudeExtra(dollars: 300, at: date("2026-09-30", hour: 23), calendar: calendar)
-        let afterReset = calendar.date(byAdding: .minute, value: 70, to: date("2026-09-30", hour: 23))!
-        ledger.recordClaudeExtra(dollars: 4, at: afterReset, calendar: calendar)
-        #expect(ledger.pendingClaudeExtra.last?.dollars == 4)
-        // The last reading was over an hour before, so the increase cannot be placed in time.
-        #expect(ledger.pendingClaudeExtra.last?.start == nil)
+        ledger.recordClaudeExtra(dollars: 300, at: date("2026-09-30", hour: 19), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 2, at: date("2026-09-30", hour: 21), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 4, at: date("2026-09-30", hour: 23), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 5, at: date("2026-10-01", hour: 1), calendar: calendar)
+        #expect(ledger.pendingClaudeExtra.dropFirst().map(\.dollars) == [2, 2, 1])
+        #expect(
+            ledger.pendingClaudeExtra[1]
+                == ClaudeExtraIncrease(
+                    start: date("2026-09-30", hour: 19), end: date("2026-09-30", hour: 21), dollars: 2))
     }
 
-    @Test func claudeDropWithinTheMonthCountsFromZero() {
+    @Test func claudeTotalCarriedPastLocalMidnightIsNotCountedAgain() {
+        // East of UTC, or on a billing-date reset, the old total is still reported in the new local month.
+        var ledger = SpendLedger()
+        ledger.recordClaudeExtra(dollars: 300, at: date("2026-09-30", hour: 23), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 302, at: date("2026-10-01", hour: 1), calendar: calendar)
+        #expect(ledger.pendingClaudeExtra.dropFirst().map(\.dollars) == [2])
+    }
+
+    @Test func claudeSingleLowReadingIsIgnored() {
+        var ledger = SpendLedger()
+        ledger.recordClaudeExtra(dollars: 300, at: date("2026-10-15", hour: 9), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 0, at: date("2026-10-15", hour: 10), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 303, at: date("2026-10-15", hour: 11), calendar: calendar)
+        #expect(
+            ledger.pendingClaudeExtra.dropFirst()
+                == [
+                    ClaudeExtraIncrease(
+                        start: date("2026-10-15", hour: 9), end: date("2026-10-15", hour: 11), dollars: 3)
+                ])
+    }
+
+    @Test func claudeDropConfirmedByTheNextReadingCountsFromZero() {
         var ledger = SpendLedger()
         ledger.recordClaudeExtra(dollars: 300, at: date("2026-10-15", hour: 9), calendar: calendar)
         ledger.recordClaudeExtra(dollars: 4, at: date("2026-10-15", hour: 10), calendar: calendar)
+        #expect(ledger.pendingClaudeExtra.count == 1)
+        ledger.recordClaudeExtra(dollars: 6, at: date("2026-10-15", hour: 11), calendar: calendar)
         #expect(
-            ledger.pendingClaudeExtra.last
-                == ClaudeExtraIncrease(
-                    start: date("2026-10-15", hour: 9), end: date("2026-10-15", hour: 10), dollars: 4))
+            ledger.pendingClaudeExtra.dropFirst()
+                == [
+                    ClaudeExtraIncrease(
+                        start: date("2026-10-15", hour: 9), end: date("2026-10-15", hour: 10), dollars: 4),
+                    ClaudeExtraIncrease(
+                        start: date("2026-10-15", hour: 10), end: date("2026-10-15", hour: 11), dollars: 2),
+                ])
+    }
+
+    @Test func claudeLongGapAcrossMonthsCountsTheNewTotalWithoutAWindow() {
+        var ledger = SpendLedger()
+        ledger.recordClaudeExtra(dollars: 300, at: date("2026-09-28"), calendar: calendar)
+        ledger.recordClaudeExtra(dollars: 350, at: date("2026-10-03"), calendar: calendar)
+        #expect(
+            ledger.pendingClaudeExtra.last == ClaudeExtraIncrease(start: nil, end: date("2026-10-03"), dollars: 350))
     }
 
     @Test func claudeIncreaseSplitsAcrossModelsByApiCost() {
