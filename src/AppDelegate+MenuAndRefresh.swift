@@ -23,6 +23,7 @@ extension AppDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(rateLimitItem)
         menu.addItem(updatedItem)
+        menu.addItem(updateItem)
 
         let breakdownItem = NSMenuItem(
             title: "Usage Breakdown", action: #selector(showUsageBreakdown), keyEquivalent: "g"
@@ -346,9 +347,14 @@ extension AppDelegate {
         shareItem.target = self
         helpMenu.addItem(shareItem)
 
-        let updateItem = NSMenuItem(title: "Update…", action: #selector(openUpdateDocs), keyEquivalent: "")
-        updateItem.target = self
-        helpMenu.addItem(updateItem)
+        let checkUpdatesItem = NSMenuItem(
+            title: "Check for Updates…", action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        checkUpdatesItem.target = self
+        if buildSource == nil {
+            checkUpdatesItem.action = nil
+            checkUpdatesItem.toolTip = "Only a build from a git clone can update itself. See README > Updating."
+        }
+        helpMenu.addItem(checkUpdatesItem)
 
         helpMenu.addItem(NSMenuItem.separator())
 
@@ -859,12 +865,6 @@ extension AppDelegate {
 
     @objc func openGitHub() {
         if let url = URL(string: "https://github.com/asboyer/claude-usage-swift") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @objc func openUpdateDocs() {
-        if let url = URL(string: "https://github.com/asboyer/claude-usage-swift#updating") {
             NSWorkspace.shared.open(url)
         }
     }

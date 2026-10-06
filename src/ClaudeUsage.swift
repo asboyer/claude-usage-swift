@@ -262,6 +262,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var alarmCheckTimer: Timer?
     var lastFetchDate: Date?
 
+    // In-app updater (see AppDelegate+Updater.swift)
+    let buildSource = BuildSource.current()
+    var updateCheckTimer: Timer?
+    var latestUpdateHash: String?
+    var updateMenuState: UpdateMenuState = .hidden
+    var updateItem: NSMenuItem!
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
@@ -385,6 +392,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updatedItem = NSMenuItem(title: "Updated: --", action: nil, keyEquivalent: "")
         rateLimitItem = NSMenuItem(title: "Rate limited. Try again later.", action: nil, keyEquivalent: "")
         rateLimitItem.isEnabled = false
+        updateItem = NSMenuItem(title: "", action: #selector(updateItemClicked), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.isHidden = true
 
         applyExtraUsageRowVisibility()
 
@@ -409,6 +419,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Start timer
         restartTimer()
+        startUpdateChecks()
 
         // Load saved hotkey
         if ud.object(forKey: "hotkeyKeyCode") != nil {

@@ -30,6 +30,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/TimeFormatting.swift \
     src/SoundPlayback.swift \
     src/AppDelegate+MenuAndRefresh.swift \
+    src/AppDelegate+Updater.swift \
     src/ClaudeUsage.swift \
     src/UsageCore.swift \
     src/UsageBreakdownCore.swift \
@@ -38,10 +39,28 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/CodexOverageCore.swift \
     src/SpendHistoryCore.swift \
     src/OpencodeUsageCore.swift \
+    src/UpdateCore.swift \
+    src/api/GitHubUpdateAPI.swift \
     -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 
+# Record where this build came from, for the in-app updater (Help > Check for Updates...).
+# Outside a git checkout of this repo these keys are omitted and the updater stays off.
+UPDATE_KEYS=""
+CLONE_PATH=$(git rev-parse --show-toplevel 2>/dev/null || true)
+# Compare against this directory, so a download sitting inside some other repo is not mistaken for a clone.
+if [ "$CLONE_PATH" = "$(pwd -P)" ] && COMMIT=$(git rev-parse HEAD 2>/dev/null); then
+    UPDATE_BRANCH="${CLAUDEUSAGE_UPDATE_BRANCH:-master}"
+    xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<< "$1"; }
+    UPDATE_KEYS="    <key>ClaudeUsageCommit</key>
+    <string>$COMMIT</string>
+    <key>ClaudeUsageClonePath</key>
+    <string>$(xml_escape "$CLONE_PATH")</string>
+    <key>ClaudeUsageUpdateBranch</key>
+    <string>$(xml_escape "$UPDATE_BRANCH")</string>"
+fi
+
 # Create Info.plist
-cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
+cat > ClaudeUsage.app/Contents/Info.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -68,6 +87,7 @@ cat > ClaudeUsage.app/Contents/Info.plist << 'EOF'
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+$UPDATE_KEYS
 </dict>
 </plist>
 EOF
@@ -84,5 +104,7 @@ else
     echo "         Keychain access will be re-prompted after every rebuild."
     echo "         See README > Keychain prompts to create one."
 fi
+
+plutil -lint -s ClaudeUsage.app/Contents/Info.plist
 
 echo "Done! Run with: open ClaudeUsage.app"
