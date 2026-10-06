@@ -72,28 +72,24 @@ private func modelLines(_ total: SpendProviderTotal) -> String {
 }
 
 private func periodPanel(
-    _ periods: [SpendPeriod], index: Int, kind: SpendKind, granularity: SpendGranularity
+    _ periods: [SpendPeriod], index: Int, granularity: SpendGranularity, filter: String
 ) -> String {
     let period = periods[index]
     var providers = ""
     for provider in SpendProvider.allCases {
         guard let total = period.provider(provider) else { continue }
         let share = period.dollars > 0 ? total.dollars / period.dollars * 100 : 0
-        let extra =
-            kind == .usage && total.extraDollars > 0
-            ? "<span class=\"provider-extra\">incl. \(money(total.extraDollars)) extra</span>" : ""
         providers += """
             <div class="provider">
               <div class="provider-row"><span class="dot \(provider.rawValue)"></span>\
-            <span class="provider-name">\(provider.displayName)</span>\(extra)\
+            <span class="provider-name">\(provider.displayName)</span>\
             <span class="provider-cost">\(money(total.dollars))</span></div>
               <div class="track"><span class="fill \(provider.rawValue)" style="width:\(String(format: "%.1f", share))%"></span></div>
               <div class="models">\(modelLines(total))</div>
             </div>
             """
     }
-    let empty =
-        kind == .extra ? "No extra billed this \(granularity.rawValue)." : "No usage this \(granularity.rawValue)."
+    let empty = "No extra billed this \(granularity.rawValue)."
     // Each period carries its own copy of the Models switch; the script keeps the copies in step.
     let content =
         providers.isEmpty
@@ -104,7 +100,7 @@ private func periodPanel(
         <div class="providers">\(providers)</div>
         """
     return """
-        <article class="period" data-k="\(kind.rawValue)" data-g="\(granularity.rawValue)" data-i="\(index)" \
+        <article class="period" data-p="\(filter)" data-g="\(granularity.rawValue)" data-i="\(index)" \
         data-title="\(periodTitle(period, granularity: granularity))" hidden>
           <p class="amount">\(money(period.dollars))</p>
           <p class="context">\(context(periods, index: index, granularity: granularity))&nbsp;</p>
@@ -133,7 +129,9 @@ private func roundedTopPath(x: Double, y: Double, width: Double, height: Double)
 }
 
 /// Every period at once, Claude and Codex stacked, for spotting patterns across weeks or months.
-private func chart(_ periods: [SpendPeriod], kind: SpendKind, granularity: SpendGranularity) -> String {
+private func chart(
+    _ periods: [SpendPeriod], granularity: SpendGranularity, filter: String
+) -> String {
     let width = 440.0
     let height = 150.0
     let left = 40.0
@@ -183,55 +181,61 @@ private func chart(_ periods: [SpendPeriod], kind: SpendKind, granularity: Spend
             """
     }
     return """
-        <svg class="chart" data-k="\(kind.rawValue)" data-g="\(granularity.rawValue)" viewBox="0 0 \(width) \(height)" hidden>\
+        <svg class="chart" data-p="\(filter)" data-g="\(granularity.rawValue)" viewBox="0 0 \(width) \(height)" hidden>\
         \(svg)</svg>
         """
 }
 
-/// Renders the Spend panel. `ledger` is nil while the first scan is still running.
-func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scanning: Bool) -> String {
+/// Renders the Spend panel, or a placeholder while `ledger` is still being scanned.
+func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double) -> String {
     var panels = ""
     var charts = ""
     var counts: [String: Int] = [:]
+    // Only providers with something recorded get a filter button, and "All" only when there are two.
+    let present = SpendProvider.allCases.filter { provider in
+        ledger?.days.values.contains { $0[provider.rawValue]?.isEmpty == false } ?? false
+    }
+    let filters: [(key: String, providers: Set<SpendProvider>)] =
+        [("all", Set(SpendProvider.allCases))] + (present.count > 1 ? present.map { ($0.rawValue, [$0]) } : [])
     if let ledger {
         for granularity in SpendGranularity.allCases {
-            let byKind = Dictionary(
-                uniqueKeysWithValues: SpendKind.allCases.map { kind in
-                    (
-                        kind,
-                        SpendHistoryCore.periods(
-                            from: ledger, kind: kind, granularity: granularity, count: 12,
-                            pricePerCredit: pricePerCredit)
-                    )
-                })
-            // Both views share one period list, starting at the first period either has data for,
-            // so switching views keeps the selected period.
-            let first =
-                SpendKind.allCases.compactMap { byKind[$0]?.firstIndex { $0.dollars > 0 } }.min() ?? 11
+            func periods(_ providers: Set<SpendProvider>) -> [SpendPeriod] {
+                return SpendHistoryCore.periods(
+                    from: ledger, providers: providers, granularity: granularity, count: 12,
+                    pricePerCredit: pricePerCredit)
+            }
+            // Every filter shares one period list, starting at the first period with any spend, so
+            // switching filters keeps the selected period.
+            let first = periods(Set(SpendProvider.allCases)).firstIndex { $0.dollars > 0 } ?? 11
             counts[granularity.rawValue] = 12 - first
-            for kind in SpendKind.allCases {
-                let periods = Array((byKind[kind] ?? [])[first...])
-                charts += chart(periods, kind: kind, granularity: granularity)
-                for index in periods.indices {
-                    panels += periodPanel(periods, index: index, kind: kind, granularity: granularity)
+            for filter in filters {
+                let shown = Array(periods(filter.providers)[first...])
+                charts += chart(shown, granularity: granularity, filter: filter.key)
+                for index in shown.indices {
+                    panels += periodPanel(shown, index: index, granularity: granularity, filter: filter.key)
                 }
             }
         }
     } else {
-        panels = "<p class=\"empty\">\(scanning ? "Reading local sessions…" : "Nothing recorded yet.")</p>"
+        panels = "<p class=\"empty\">Reading local sessions…</p>"
     }
 
     var sources =
-        "Extra is what was billed past your plans. Codex overage is estimated from sessions on this Mac at "
+        "Spend billed past your plans. Codex overage is estimated from sessions on this Mac at "
         + "\(CodexOverageCore.formatPrice(pricePerCredit)) per credit (Settings › Codex Credit Price); "
         + "Claude Extra comes from the usage the Claude API reports"
     if let since = ledger?.claudeTrackedSince {
         sources += ", recorded since \(format(since, "MMM d, yyyy"))"
     }
     sources +=
-        ". All usage prices every request at Claude's API rates and Codex's credit rates — what the usage "
-        + "would cost, not what your subscription charges."
-    let status = scanning && ledger != nil ? "<span class=\"status\">Updating…</span>" : ""
+        ". Opencode spend is the cost opencode records for each pay-per-token request; "
+        + "subscription-billed turns cost nothing there and are left out."
+    let providerButtons = filters.map { filter in
+        "<button data-v=\"\(filter.key)\">\(filter.key == "all" ? "All" : SpendProvider(rawValue: filter.key)?.displayName ?? filter.key)</button>"
+    }.joined()
+    let legend = present.map { provider in
+        "<span data-p=\"\(provider.rawValue)\"><span class=\"dot \(provider.rawValue)\"></span>\(provider.displayName)</span>"
+    }.joined()
     let countsJSON = "{\"week\":\(counts["week"] ?? 0),\"month\":\(counts["month"] ?? 0)}"
     let controls = ledger == nil ? " hidden" : ""
 
@@ -243,12 +247,12 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
         <style>
           :root {
             --surface: #fcfcfb; --text: #0b0b0b; --text-2: #6b6a66; --rule: #ebeae6; --soft: #f3f2ef;
-            --claude: #eb6834; --codex: #2a78d6;
+            --claude: #eb6834; --codex: #2a78d6; --opencode: #1baf7a;
           }
           @media (prefers-color-scheme: dark) {
             :root {
               --surface: #1a1a19; --text: #f5f5f3; --text-2: #a3a29a; --rule: #2e2e2c; --soft: #262624;
-              --claude: #d95926; --codex: #3987e5;
+              --claude: #d95926; --codex: #3987e5; --opencode: #199e70;
             }
           }
           * { box-sizing: border-box; }
@@ -261,7 +265,6 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
           header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
           h1 { font-size: 13px; font-weight: 600; margin: 0; }
           .spacer { flex: 1; }
-          .status { color: var(--text-2); font-size: 11px; }
           .info {
             display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
             border-radius: 50%; border: 1px solid var(--text-2); color: var(--text-2); font: italic 600 9px Georgia, serif;
@@ -269,8 +272,8 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
           }
           .segmented { display: inline-flex; background: var(--soft); border-radius: 7px; padding: 2px; }
           .segmented button {
-            border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px;
-            padding: 3px 10px; border-radius: 5px; cursor: pointer;
+            border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px; white-space: nowrap;
+            padding: 3px 9px; border-radius: 5px; cursor: pointer;
           }
           .segmented button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
           nav { display: flex; align-items: center; gap: 8px; }
@@ -290,12 +293,12 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
           .provider-row { display: flex; align-items: center; gap: 8px; }
           .dot { width: 8px; height: 8px; border-radius: 50%; }
           .provider-name { flex: 1; font-weight: 500; }
-          .provider-extra { color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
           .provider-cost { width: 80px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
           .track { height: 4px; margin-top: 8px; background: var(--soft); border-radius: 2px; overflow: hidden; }
           .fill { display: block; height: 100%; border-radius: 2px; }
           .claude { background: var(--claude); fill: var(--claude); }
           .codex { background: var(--codex); fill: var(--codex); }
+          .opencode { background: var(--opencode); fill: var(--opencode); }
           .models { display: none; margin-top: 8px; }
           body.show-models .models { display: block; }
           .model { display: flex; align-items: baseline; gap: 8px; padding: 3px 0 3px 16px; font-size: 12px; }
@@ -337,8 +340,8 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
         <body>
           <div class="page">
             <header>
-              <h1>Spend\(info(sources))</h1>\(status)<span class="spacer"></span>
-              <div class="segmented"\(controls) data-control="k"><button data-v="extra">Extra</button><button data-v="usage">All usage</button></div>
+              <h1>Spend\(info(sources))</h1><span class="spacer"></span>
+              <div class="segmented"\(filters.count > 1 ? controls : " hidden") data-control="p">\(providerButtons)</div>
               <div class="segmented"\(controls) data-control="g"><button data-v="week">Week</button><button data-v="month">Month</button></div>
             </header>
             <nav\(controls)>
@@ -349,7 +352,7 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
             \(panels)
             <div class="charts"\(controls)>
               <div class="section-head legend-row"><span id="chart-title"></span>\
-            <span class="legend"><span><span class="dot claude"></span>Claude</span><span><span class="dot codex"></span>Codex</span></span></div>
+            <span class="legend">\(legend)</span></div>
               \(charts)
             </div>
           </div>
@@ -360,9 +363,12 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
               get(key, fallback) { try { return localStorage.getItem('spend-' + key) ?? fallback; } catch (e) { return fallback; } },
               set(key, value) { try { localStorage.setItem('spend-' + key, value); } catch (e) {} },
             };
-            const state = { k: store.get('k', 'extra'), g: store.get('g', 'week') };
+            const filters = [...document.querySelectorAll('[data-control="p"] button')].map(b => b.dataset.v);
+            const state = { p: store.get('p', 'all'), g: store.get('g', 'week') };
+            // A provider remembered from before may have no data now.
+            if (!filters.includes(state.p)) state.p = 'all';
             const index = { week: counts.week - 1, month: counts.month - 1 };
-            const matches = el => el.dataset.k === state.k && el.dataset.g === state.g;
+            const matches = el => el.dataset.p === state.p && el.dataset.g === state.g;
             function render() {
               document.querySelectorAll('.segmented').forEach(c => c.querySelectorAll('button').forEach(
                 b => b.classList.toggle('on', b.dataset.v === state[c.dataset.control])));
@@ -375,6 +381,8 @@ func generateSpendHistoryHTML(ledger: SpendLedger?, pricePerCredit: Double, scan
               });
               const n = counts[state.g];
               document.getElementById('chart-title').textContent = `Last ${n} ${state.g}${n === 1 ? '' : 's'}`;
+              document.querySelectorAll('.legend [data-p]').forEach(
+                el => el.hidden = state.p !== 'all' && el.dataset.p !== state.p);
               document.querySelectorAll('.column').forEach(c => c.classList.toggle('off', +c.dataset.i !== i));
               document.getElementById('prev').disabled = i <= 0;
               document.getElementById('next').disabled = i >= counts[state.g] - 1;

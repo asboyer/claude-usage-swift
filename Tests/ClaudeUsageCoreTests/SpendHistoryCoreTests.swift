@@ -107,8 +107,8 @@ struct SpendHistoryCoreTests {
 
     @Test func codexMergeKeepsHistoryOnceSessionsAreDeleted() {
         var ledger = SpendLedger()
-        ledger.mergeCodex(days: ["2026-09-01": ["codex": ["gpt-6-astra": SpendEntry(tokens: 100, credits: 5)]]])
-        ledger.mergeCodex(days: ["2026-09-01": ["codex": ["gpt-6-astra": SpendEntry(tokens: 40, credits: 2)]]])
+        ledger.merge(.codex, days: ["2026-09-01": ["codex": ["gpt-6-astra": SpendEntry(tokens: 100, credits: 5)]]])
+        ledger.merge(.codex, days: ["2026-09-01": ["codex": ["gpt-6-astra": SpendEntry(tokens: 40, credits: 2)]]])
         #expect(ledger.days["2026-09-01"]?["codex"]?["gpt-6-astra"]?.credits == 5)
     }
 
@@ -122,7 +122,7 @@ struct SpendHistoryCoreTests {
 
     @Test func periodsRollExtraSpendIntoWeeksWithTokenShares() {
         var ledger = SpendLedger()
-        ledger.mergeCodex(days: [
+        ledger.merge(.codex, days: [
             "2026-10-05": [
                 "codex": [
                     "gpt-6-astra": SpendEntry(tokens: 300, credits: 2_500),
@@ -151,38 +151,6 @@ struct SpendHistoryCoreTests {
         #expect(thisWeek.dollars == 123)
     }
 
-    @Test func usageDaysPriceEveryRequest() {
-        let days = SpendLedgerBuilder.usageDays(
-            claude: [claude("2026-10-05", hour: 9), claude("2026-10-05", hour: 10, model: "claude-opus-5[1m]")],
-            codex: [codex("r1", "2026-10-05"), codex("r1", "2026-10-05"), codex("r2", "2026-10-05", model: "unknown")],
-            calendar: calendar)
-        #expect(days["2026-10-05"]?["claude"] == ["claude-opus-5": SpendEntry(tokens: 2_000_000, dollars: 10)])
-        // The replayed response counts once and the unpriced model is left out.
-        #expect(days["2026-10-05"]?["codex"] == ["gpt-6-astra": SpendEntry(tokens: 1_000_000, credits: 250)])
-    }
-
-    @Test func usagePeriodsCarryTheirExtraPart() {
-        var ledger = SpendLedger()
-        ledger.mergeUsage(days: [
-            "2026-10-05": [
-                "claude": ["claude-opus-5": SpendEntry(tokens: 100, dollars: 40)],
-                "codex": ["gpt-6-astra": SpendEntry(tokens: 100, credits: 1_000)],
-            ]
-        ])
-        ledger.add(days: ["2026-10-05": ["claude": ["claude-opus-5": SpendEntry(tokens: 20, dollars: 8)]]])
-        let usage = SpendHistoryCore.periods(
-            from: ledger, kind: .usage, granularity: .week, count: 1, pricePerCredit: 0.04,
-            now: date("2026-10-07"), calendar: calendar)[0]
-        #expect(usage.dollars == 80)
-        #expect(usage.provider(.claude)?.extraDollars == 8)
-        #expect(usage.provider(.codex)?.extraDollars == 0)
-        let extra = SpendHistoryCore.periods(
-            from: ledger, kind: .extra, granularity: .week, count: 1, pricePerCredit: 0.04,
-            now: date("2026-10-07"), calendar: calendar)[0]
-        #expect(extra.dollars == 8)
-        #expect(extra.providers.map(\.provider) == [.claude])
-    }
-
     @Test func periodsLeaveOutProvidersWithNoExtraSpend() {
         var ledger = SpendLedger()
         ledger.add(days: ["2026-10-06": ["claude": ["claude-opus-5": SpendEntry(tokens: 50, dollars: 7)]]])
@@ -191,5 +159,42 @@ struct SpendHistoryCoreTests {
             now: date("2026-10-07"), calendar: calendar
         )
         #expect(periods[0].providers.map(\.provider) == [.claude])
+    }
+
+    @Test func periodsKeepOnlyTheChosenProviders() {
+        var ledger = SpendLedger()
+        ledger.add(days: ["2026-10-06": ["claude": ["claude-opus-5": SpendEntry(tokens: 50, dollars: 7)]]])
+        ledger.merge(.codex, days: ["2026-10-06": ["codex": ["gpt-6-astra": SpendEntry(tokens: 10, credits: 100)]]])
+        let codexOnly = SpendHistoryCore.periods(
+            from: ledger, providers: [.codex], granularity: .week, count: 1, pricePerCredit: 0.04,
+            now: date("2026-10-07"), calendar: calendar)[0]
+        #expect(codexOnly.providers.map(\.provider) == [.codex])
+        #expect(codexOnly.dollars == 4)
+    }
+
+    // MARK: - Opencode
+
+    @Test func opencodeSpendCountsPaidTurnsOnly() {
+        let days = SpendLedgerBuilder.opencodeDays(
+            requests: [
+                OpencodeRequestCost(timestamp: date("2026-10-05", hour: 9), model: "kimi-k3", tokens: 100, costUSD: 2),
+                OpencodeRequestCost(timestamp: date("2026-10-05", hour: 10), model: "kimi-k3", tokens: 50, costUSD: 1),
+                OpencodeRequestCost(timestamp: date("2026-10-05", hour: 11), model: "free", tokens: 900, costUSD: 0),
+            ], calendar: calendar)
+        #expect(days["2026-10-05"]?["opencode"] == ["kimi-k3": SpendEntry(tokens: 150, dollars: 3)])
+
+        var ledger = SpendLedger()
+        ledger.merge(.opencode, days: days)
+        let period = SpendHistoryCore.periods(
+            from: ledger, granularity: .week, count: 1, pricePerCredit: 0.04,
+            now: date("2026-10-07"), calendar: calendar)[0]
+        #expect(period.provider(.opencode)?.dollars == 3)
+    }
+
+    // MARK: - Rescan cutoff
+
+    @Test func codexRescanStartsTheDayBeforeTheLastScan() {
+        let cutoff = SpendLedgerBuilder.codexRescanCutoff(lastScan: date("2026-10-06", hour: 15), calendar: calendar)
+        #expect(cutoff == calendar.startOfDay(for: date("2026-10-05")))
     }
 }

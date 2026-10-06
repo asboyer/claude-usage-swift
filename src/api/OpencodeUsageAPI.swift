@@ -33,8 +33,42 @@ func fetchOpencodeUsage(completion: @escaping (OpencodeUsage?) -> Void) {
     completion(OpencodeUsage(models: OpencodeUsageCore.rank(costsByModel), monthStart: monthStart))
 }
 
-/// Opens the database read-only so a running opencode is never blocked or modified.
+/// Every completed, paid assistant turn since `cutoff`, for the spend history.
+private let opencodeRequestQuery = """
+    SELECT time_created, json_extract(data, '$.modelID'),
+           COALESCE(json_extract(data, '$.tokens.total'), 0), json_extract(data, '$.cost')
+    FROM message
+    WHERE time_created >= ?
+      AND json_extract(data, '$.role') = 'assistant'
+      AND json_extract(data, '$.cost') > 0
+    """
+
+/// Nil when opencode isn't installed or its database can't be read.
+func fetchOpencodeRequestCosts(since cutoff: Date) -> [OpencodeRequestCost]? {
+    guard FileManager.default.fileExists(atPath: opencodeDatabasePath) else { return nil }
+    return queryOpencode(opencodeRequestQuery, since: cutoff) { statement in
+        guard let modelID = sqlite3_column_text(statement, 1) else { return nil }
+        return OpencodeRequestCost(
+            timestamp: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 0)) / 1000),
+            model: OpencodeModelSpend(modelID: String(cString: modelID), costUSD: 0).displayName,
+            tokens: Int(sqlite3_column_int64(statement, 2)),
+            costUSD: sqlite3_column_double(statement, 3))
+    }
+}
+
 private func queryOpencodeCosts(since monthStart: Date) -> [String: Double]? {
+    let rows = queryOpencode(opencodeCostQuery, since: monthStart) { statement -> (String, Double)? in
+        guard let modelID = sqlite3_column_text(statement, 0) else { return nil }
+        return (String(cString: modelID), sqlite3_column_double(statement, 1))
+    }
+    return rows.map { Dictionary($0, uniquingKeysWith: +) }
+}
+
+/// Opens the database read-only so a running opencode is never blocked or modified, and binds
+/// `since` as the query's one millisecond-timestamp parameter.
+private func queryOpencode<Row>(
+    _ query: String, since: Date, row: (OpaquePointer?) -> Row?
+) -> [Row]? {
     let escapedPath =
         opencodeDatabasePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
         ?? opencodeDatabasePath
@@ -52,18 +86,17 @@ private func queryOpencodeCosts(since monthStart: Date) -> [String: Double]? {
     defer { sqlite3_close(database) }
 
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(database, opencodeCostQuery, -1, &statement, nil) == SQLITE_OK else {
+    guard sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK else {
         sqlite3_finalize(statement)
         return nil
     }
     defer { sqlite3_finalize(statement) }
 
-    sqlite3_bind_int64(statement, 1, Int64(monthStart.timeIntervalSince1970 * 1000))
+    sqlite3_bind_int64(statement, 1, Int64(since.timeIntervalSince1970 * 1000))
 
-    var costsByModel: [String: Double] = [:]
+    var rows: [Row] = []
     while sqlite3_step(statement) == SQLITE_ROW {
-        guard let modelID = sqlite3_column_text(statement, 0) else { continue }
-        costsByModel[String(cString: modelID)] = sqlite3_column_double(statement, 1)
+        if let value = row(statement) { rows.append(value) }
     }
-    return costsByModel
+    return rows
 }

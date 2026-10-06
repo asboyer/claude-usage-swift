@@ -29,17 +29,23 @@ private func writeSpendLedger(_ ledger: SpendLedger) {
     }
 }
 
-/// Reads every local Claude Code transcript and Codex session: all usage for the usage view,
-/// Codex overage, and the requests behind pending Claude Extra increases. Slow on a busy machine,
-/// so callers run it off the main thread.
+/// Reads Codex sessions for overage, opencode's database, and the Claude Code transcripts behind
+/// pending Claude Extra increases. After the first scan only Codex files touched since the last
+/// one are read. Callers run it off the main thread, since the first scan reads every Codex session.
 @discardableResult
-func rescanSpendLedger(includeCodex: Bool, now: Date = Date()) -> SpendLedger {
-    let pending = loadSpendLedger().pendingClaudeExtra
-    let twentyYears = 24 * 365 * 20
-    let claude = ClaudeCodeTranscripts.recentRequests(windowHours: twentyYears, now: now)
-    let codex = includeCodex ? scanCodexSessions(modifiedSince: .distantPast) : (requests: [], readings: [])
+func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Date()) -> SpendLedger {
+    let saved = loadSpendLedger()
+    let pending = saved.pendingClaudeExtra
+    // Only requests inside a pending increase's window are needed to split it by model.
+    let claude = pending.compactMap(\.start).min().map { start in
+        ClaudeCodeTranscripts.recentRequests(windowHours: Int(now.timeIntervalSince(start) / 3600) + 1, now: now)
+    } ?? []
+    let codexCutoff = saved.lastScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0) } ?? .distantPast
+    let codex = includeCodex ? scanCodexSessions(modifiedSince: codexCutoff) : (requests: [], readings: [])
     let codexExtra = SpendLedgerBuilder.codexDays(requests: codex.requests, readings: codex.readings)
-    let usage = SpendLedgerBuilder.usageDays(claude: claude, codex: codex.requests)
+    // Opencode keeps its own history, so it is always read in full.
+    let opencode = SpendLedgerBuilder.opencodeDays(
+        requests: includeOpencode ? fetchOpencodeRequestCosts(since: .distantPast) ?? [] : [])
 
     spendLedgerLock.lock()
     defer { spendLedgerLock.unlock() }
@@ -49,8 +55,8 @@ func rescanSpendLedger(includeCodex: Bool, now: Date = Date()) -> SpendLedger {
     let unclaimed = pending.filter { ledger.pendingClaudeExtra.contains($0) }
     ledger.add(days: SpendLedgerBuilder.claudeDays(increases: unclaimed, requests: claude))
     ledger.pendingClaudeExtra.removeAll { unclaimed.contains($0) }
-    ledger.mergeCodex(days: codexExtra)
-    ledger.mergeUsage(days: usage)
+    ledger.merge(.codex, days: codexExtra)
+    ledger.merge(.opencode, days: opencode)
     ledger.lastScan = now
     writeSpendLedger(ledger)
     return ledger

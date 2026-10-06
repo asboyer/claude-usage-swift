@@ -24,6 +24,15 @@ struct OpencodeUsage: Equatable {
     }
 }
 
+/// One completed opencode turn, as the spend history records it.
+struct OpencodeRequestCost: Equatable {
+    let timestamp: Date
+    /// Display name, the model path's trailing segment.
+    let model: String
+    let tokens: Int
+    let costUSD: Double
+}
+
 enum OpencodeUsageCore {
     /// How many models the section lists before hiding the rest behind "More".
     static let collapsedModelCount = 3

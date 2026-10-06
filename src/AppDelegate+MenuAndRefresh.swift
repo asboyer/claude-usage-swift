@@ -649,20 +649,16 @@ extension AppDelegate {
         webView.setValue(false, forKey: "drawsBackground")
         panel.contentView?.addSubview(webView)
 
-        // The saved ledger shows at once; a fresh scan of every session follows and replaces it.
-        let saved = loadSpendLedger()
+        // One snapshot per opening: a placeholder while the scan catches up, then the result.
+        webView.loadHTMLString(generateSpendHistoryHTML(ledger: nil, pricePerCredit: 0), baseURL: nil)
         let price = codexCreditPrice
-        webView.loadHTMLString(
-            generateSpendHistoryHTML(ledger: saved.lastScan == nil ? nil : saved, pricePerCredit: price, scanning: true),
-            baseURL: nil
-        )
         let includeCodex = codexTrackingEnabled
+        let includeOpencode = opencodeTrackingEnabled
         DispatchQueue.global(qos: .userInitiated).async { [weak panel, weak webView] in
-            let ledger = rescanSpendLedger(includeCodex: includeCodex)
+            let ledger = rescanSpendLedger(includeCodex: includeCodex, includeOpencode: includeOpencode)
             DispatchQueue.main.async {
                 guard panel != nil, let webView else { return }
-                webView.loadHTMLString(
-                    generateSpendHistoryHTML(ledger: ledger, pricePerCredit: price, scanning: false), baseURL: nil)
+                webView.loadHTMLString(generateSpendHistoryHTML(ledger: ledger, pricePerCredit: price), baseURL: nil)
             }
         }
 
@@ -679,8 +675,9 @@ extension AppDelegate {
         }
         spendLedgerScanInFlight = true
         let includeCodex = codexTrackingEnabled
+        let includeOpencode = opencodeTrackingEnabled
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            rescanSpendLedger(includeCodex: includeCodex)
+            rescanSpendLedger(includeCodex: includeCodex, includeOpencode: includeOpencode)
             DispatchQueue.main.async { self?.spendLedgerScanInFlight = false }
         }
     }

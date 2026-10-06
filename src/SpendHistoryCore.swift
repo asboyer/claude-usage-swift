@@ -5,17 +5,18 @@ import Foundation
 enum SpendProvider: String, CaseIterable, Codable {
     case claude
     case codex
+    case opencode
 
     var displayName: String {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .opencode: return "Opencode"
         }
     }
 }
 
-/// One model's spend on one day, either what was billed past the plan or all usage priced at
-/// published rates. Codex is kept in credits, so a change to the credit price reprices all of history.
+/// One model's spend on one day billed past the plan. Codex is kept in credits, so a change to the credit price reprices all of history.
 struct SpendEntry: Codable, Equatable {
     /// Tokens behind the spend.
     var tokens = 0
@@ -50,8 +51,6 @@ struct ClaudeExtraReading: Codable, Equatable {
 struct SpendLedger: Codable, Equatable {
     /// "yyyy-MM-dd" in local time -> provider -> model -> extra spend.
     var days: SpendDays = [:]
-    /// The same shape for all usage, extra included, priced at API or credit rates.
-    var usageDays: SpendDays = [:]
     /// Claude increases not yet split across models; the next scan attributes them.
     var pendingClaudeExtra: [ClaudeExtraIncrease] = []
     var lastClaudeExtra: ClaudeExtraReading?
@@ -59,29 +58,16 @@ struct SpendLedger: Codable, Equatable {
     var claudeTrackedSince: Date?
     var lastScan: Date?
 
-    /// Keeps, per day and model, whichever Codex entry covers more tokens. A scan only ever sees
-    /// fewer tokens for a day than before once older session files have been deleted.
-    mutating func mergeCodex(days scanned: SpendDays) {
-        let key = SpendProvider.codex.rawValue
+    /// Keeps, per day and model, whichever entry of `provider` covers more tokens. A scan only ever
+    /// sees fewer tokens for a day than before once older session files have been deleted, or when
+    /// it read only the files touched since the last scan.
+    mutating func merge(_ provider: SpendProvider, days scanned: SpendDays) {
+        let key = provider.rawValue
         for (day, providers) in scanned {
             for (model, entry) in providers[key] ?? [:] {
                 let stored = days[day]?[key]?[model]
                 if stored == nil || entry.tokens >= stored!.tokens {
                     days[day, default: [:]][key, default: [:]][model] = entry
-                }
-            }
-        }
-    }
-
-    /// Keeps, per day and model, whichever usage entry covers more tokens, for the same reason.
-    mutating func mergeUsage(days scanned: SpendDays) {
-        for (day, providers) in scanned {
-            for (provider, models) in providers {
-                for (model, entry) in models {
-                    let stored = usageDays[day]?[provider]?[model]
-                    if stored == nil || entry.tokens >= stored!.tokens {
-                        usageDays[day, default: [:]][provider, default: [:]][model] = entry
-                    }
                 }
             }
         }
@@ -146,25 +132,22 @@ enum SpendLedgerBuilder {
         ].add(entry)
     }
 
-    /// Every request per day and model, priced at API rates for Claude and credit rates for Codex.
-    /// Codex requests on models without a credit rate are left out.
-    static func usageDays(
-        claude: [TranscriptRequest], codex: [CodexModelRequest], calendar: Calendar = .current
-    ) -> SpendDays {
+    /// Opencode spend per day and model. Opencode bills per token, so all of its cost is extra.
+    static func opencodeDays(requests: [OpencodeRequestCost], calendar: Calendar = .current) -> SpendDays {
         var days: SpendDays = [:]
-        for request in claude {
+        for request in requests where request.costUSD > 0 {
             add(
-                &days, request.timestamp, .claude, displayModel(request.model), calendar: calendar,
-                SpendEntry(tokens: request.contextTokens + request.outputTokens, dollars: request.weightedCost))
-        }
-        var seen = Set<String>()
-        for request in codex where seen.insert(request.identity).inserted {
-            guard let credits = request.credits, let model = request.model else { continue }
-            add(
-                &days, request.timestamp, .codex, model, calendar: calendar,
-                SpendEntry(tokens: request.totalTokens, credits: credits))
+                &days, request.timestamp, .opencode, request.model, calendar: calendar,
+                SpendEntry(tokens: request.tokens, dollars: request.costUSD))
         }
         return days
+    }
+
+    /// Where an incremental Codex rescan starts reading. A request on a day at or after the cutoff can
+    /// only be in a file modified since then, so those days come back complete; the day before is
+    /// included so a request still finds the limit reading logged just before it.
+    static func codexRescanCutoff(lastScan: Date, calendar: Calendar = .current) -> Date {
+        return calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: lastScan)) ?? lastScan
     }
 
     /// Codex overage per day and model. Requests on models without a credit rate are left out.
@@ -225,13 +208,6 @@ enum SpendLedgerBuilder {
 
 // MARK: - Periods
 
-enum SpendKind: String, CaseIterable {
-    /// Billed past the plans: Claude Extra usage and Codex overage.
-    case extra
-    /// All usage priced at published rates, extra included.
-    case usage
-}
-
 enum SpendGranularity: String, CaseIterable {
     case week
     case month
@@ -251,8 +227,6 @@ struct SpendModelRow: Equatable {
 struct SpendProviderTotal: Equatable {
     let provider: SpendProvider
     let dollars: Double
-    /// The part of `dollars` billed past the plan; equal to it for extra spend.
-    let extraDollars: Double
     /// Most expensive first.
     let models: [SpendModelRow]
 }
@@ -267,10 +241,6 @@ struct SpendPeriod: Equatable {
         return providers.reduce(0) { $0 + $1.dollars }
     }
 
-    var extraDollars: Double {
-        return providers.reduce(0) { $0 + $1.extraDollars }
-    }
-
     func provider(_ provider: SpendProvider) -> SpendProviderTotal? {
         return providers.first { $0.provider == provider }
     }
@@ -280,7 +250,7 @@ enum SpendHistoryCore {
     /// The last `count` periods ending with the current one, oldest first.
     static func periods(
         from ledger: SpendLedger,
-        kind: SpendKind = .extra,
+        providers shownProviders: Set<SpendProvider> = Set(SpendProvider.allCases),
         granularity: SpendGranularity,
         count: Int,
         pricePerCredit: Double,
@@ -311,17 +281,13 @@ enum SpendHistoryCore {
             }
             return buckets
         }
-        let extra = bucket(ledger.days)
-        let shown = kind == .extra ? extra : bucket(ledger.usageDays)
+        let buckets = bucket(ledger.days)
 
         return intervals.enumerated().map { index, interval in
-            let providers = SpendProvider.allCases.compactMap { provider -> SpendProviderTotal? in
-                let key = provider.rawValue
-                let extraTotal = providerTotal(
-                    provider, models: extra[index][key] ?? [:], extraDollars: 0, pricePerCredit: pricePerCredit)
+            let providers = SpendProvider.allCases.filter(shownProviders.contains).compactMap {
+                provider -> SpendProviderTotal? in
                 let total = providerTotal(
-                    provider, models: shown[index][key] ?? [:], extraDollars: extraTotal.dollars,
-                    pricePerCredit: pricePerCredit)
+                    provider, models: buckets[index][provider.rawValue] ?? [:], pricePerCredit: pricePerCredit)
                 return total.dollars > 0 ? total : nil
             }
             return SpendPeriod(start: interval.start, end: interval.end, providers: providers)
@@ -329,7 +295,7 @@ enum SpendHistoryCore {
     }
 
     private static func providerTotal(
-        _ provider: SpendProvider, models: [String: SpendEntry], extraDollars: Double, pricePerCredit: Double
+        _ provider: SpendProvider, models: [String: SpendEntry], pricePerCredit: Double
     ) -> SpendProviderTotal {
         let tokens = models.values.reduce(0) { $0 + $1.tokens }
         var rows: [SpendModelRow] = []
@@ -341,8 +307,7 @@ enum SpendHistoryCore {
         }
         rows.sort { $0.dollars != $1.dollars ? $0.dollars > $1.dollars : $0.model < $1.model }
         return SpendProviderTotal(
-            provider: provider, dollars: rows.reduce(0) { $0 + $1.dollars }, extraDollars: extraDollars,
-            models: rows)
+            provider: provider, dollars: rows.reduce(0) { $0 + $1.dollars }, models: rows)
     }
 
     static func parseDay(_ day: String, calendar: Calendar) -> Date? {
