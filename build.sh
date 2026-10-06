@@ -33,6 +33,7 @@ swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/UsageBreakdownCore.swift \
     src/ClaudeCodeTranscripts.swift \
     src/CodexUsageCore.swift \
+    src/CodexOverageCore.swift \
     src/OpencodeUsageCore.swift \
     -framework Cocoa -framework Carbon -framework ServiceManagement -framework WebKit
 

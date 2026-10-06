@@ -4,6 +4,7 @@ let appVersion = "2.2.0"
 let appAuthor = "asboyer"
 
 let scopedWeeklyKey = "weekly_scoped"
+let codexExtraKey = "codex_extra"
 
 // Claude usage categories.
 // `extra_usage` sits right after the scoped weekly row because that limit is what
@@ -13,8 +14,9 @@ let claudeCategoryKeys: [String] = [
     "seven_day_sonnet", "seven_day_oauth_apps", "seven_day_cowork",
 ]
 
-// Codex usage categories, ordered like Claude's: session window first, then weekly.
-let codexCategoryKeys: [String] = ["codex_five_hour", "codex_weekly"]
+// Codex usage categories, ordered like Claude's: session window first, then weekly, then the
+// estimated spend past those limits.
+let codexCategoryKeys: [String] = ["codex_five_hour", "codex_weekly", codexExtraKey]
 
 // Cursor usage categories: the two included-usage buckets, both on the monthly billing cycle.
 let cursorCategoryKeys: [String] = ["cursor_models", "cursor_other_models"]
@@ -33,6 +35,7 @@ let categoryLabels: [String: String] = [
     "extra_usage": "Extra",
     "codex_five_hour": "5-hour",
     "codex_weekly": "Weekly",
+    codexExtraKey: "Extra",
     "cursor_models": "Cursor Models",
     "cursor_other_models": "Other Models",
 ]
@@ -53,5 +56,5 @@ let providerSectionTitles: [UsageProvider: String] = [
 
 let defaultPinnedKeys: Set<String> = [
     "five_hour", "seven_day", scopedWeeklyKey, "extra_usage", "codex_five_hour", "codex_weekly",
-    "cursor_models", "cursor_other_models",
+    codexExtraKey, "cursor_models", "cursor_other_models",
 ]

@@ -222,3 +222,74 @@ private func readCodexUsage(fromSessionFile url: URL) -> CodexUsage? {
     }
     return nil
 }
+
+// MARK: - Overage estimate
+
+/// One session file's parsed records, reused until the file changes. A week of sessions runs to
+/// hundreds of megabytes, almost all of it in files that are no longer being written.
+private struct CodexSessionScan {
+    let size: Int
+    let modified: Date
+    let requests: [CodexModelRequest]
+    let readings: [CodexLimitReading]
+}
+
+private var codexSessionScans: [URL: CodexSessionScan] = [:]
+private let codexSessionScanLock = NSLock()
+
+/// Estimates the credits Codex drew past its limits in the current weekly window, from the
+/// token usage Codex CLI logs per model request. Only sessions run on this machine are seen.
+func estimateCodexOverage(usage: CodexUsage, now: Date = Date()) -> CodexOverageEstimate? {
+    guard let weekly = usage.weekly else { return nil }
+    let windowSeconds = weekly.windowSeconds > 0 ? weekly.windowSeconds : CodexWindowSelector.weeklyWindowSeconds
+    let windowStart = (weekly.resetsAt ?? now).addingTimeInterval(-windowSeconds)
+
+    // Overlapping refreshes would otherwise parse the same files twice and race on the cache.
+    codexSessionScanLock.lock()
+    defer { codexSessionScanLock.unlock() }
+
+    var scans: [URL: CodexSessionScan] = [:]
+    var requests: [CodexModelRequest] = []
+    var readings: [CodexLimitReading] = []
+    for (url, size, modified) in codexSessionFiles(modifiedSince: windowStart) {
+        let scan: CodexSessionScan
+        if let cached = codexSessionScans[url], cached.size == size, cached.modified == modified {
+            scan = cached
+        } else {
+            var parser = CodexSessionParser()
+            for line in LineReader(url: url) {
+                parser.consume(line: line)
+            }
+            scan = CodexSessionScan(
+                size: size, modified: modified, requests: parser.requests, readings: parser.readings)
+        }
+        scans[url] = scan
+        requests.append(contentsOf: scan.requests)
+        readings.append(contentsOf: scan.readings)
+    }
+    // Files that fell out of the window are dropped rather than kept forever.
+    codexSessionScans = scans
+    return CodexOverageCore.estimate(
+        requests: requests, readings: readings, since: windowStart, until: weekly.resetsAt)
+}
+
+private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: Int, modified: Date)] {
+    let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+    guard
+        let enumerator = FileManager.default.enumerator(
+            at: codexHomeDirectory().appendingPathComponent("sessions"),
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]
+        )
+    else { return [] }
+
+    var files: [(url: URL, size: Int, modified: Date)] = []
+    for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+        let values = try? url.resourceValues(forKeys: Set(keys))
+        guard values?.isRegularFile == true else { continue }
+        // A session untouched since the window opened cannot hold a request inside it.
+        guard let modified = values?.contentModificationDate, modified >= cutoff else { continue }
+        files.append((url, values?.fileSize ?? 0, modified))
+    }
+    return files
+}

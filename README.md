@@ -12,6 +12,7 @@ A lightweight native macOS menu bar app that displays your Claude, OpenAI Codex,
 | ------- | ----------- |
 | **Live usage in menu bar** | See your 5-hour session percentage and weekly usage at a glance. |
 | **Codex usage** | Tracks your Codex 5-hour and weekly limits alongside Claude, listed under its own heading in the dropdown. |
+| **Codex overage estimate** | Once a Codex limit hits 100%, an **Extra** row estimates the credits (and dollars) spent past it this week, from the token counts Codex logs locally. |
 | **Cursor usage** | Tracks the two included-usage buckets on your Cursor plan — Cursor Models and Other Models — under its own heading. |
 | **Opencode spend** | Shows month-to-date dollars per model, read from opencode's own session database. No API key, no network call. |
 | **Follows what you just used** | The menu bar shows the percentage for whichever provider's usage increased most recently. |
@@ -151,6 +152,16 @@ The fallback data is only as fresh as your last Codex run, so re-running `codex`
 
 > The Codex usage endpoint is an internal, undocumented ChatGPT API. It is not covered by any stability guarantee and its shape may change.
 
+#### Codex overage estimate
+
+Codex does not report how many credits you have spent past your limits, so the **Extra** row under Codex estimates it:
+
+1. Reads the `token_usage_record` Codex CLI logs in `~/.codex/sessions/` for every model request (input, cached input, and output tokens), plus the 5-hour and weekly readings it logs after each response. One message to Codex can fan out into many model requests as it calls tools and the model again; each is billed separately.
+2. Keeps the requests sent since the current weekly window began while either window was already at 100% (and not yet reset), judged by the latest reading before each request. Limits are account-wide, so readings from every session count.
+3. Prices each request with OpenAI's [Codex credit rates](https://learn.chatgpt.com/docs/pricing) for its model, then converts credits to dollars at **Settings → Codex Credit Price** ($0.04 by default, OpenAI's price for credit packs; pick $0.03, $0.05, or enter a custom price if your workspace pays differently)
+
+The row covers the current Codex **weekly window**, from the last weekly reset to the next one, and starts over at each reset; it stays hidden until the estimate is above zero. Hover it for a submenu with the exact period and the spend split by model; the ⓘ on its last line explains how the estimate is made. Like Claude's Extra spend, the estimate takes over the Codex menu bar text (shown as `~$48.07`) while it is growing or while the Codex window is at 100%, and hands back to the percentage once session usage moves again. It is an estimate: only sessions on this Mac are counted (not Codex Cloud tasks or other devices), and requests on models without a published rate are left out (hover the row to see how many).
+
 ### Cursor usage
 
 Cursor is fetched independently on the same refresh cycle. Unlike Claude and Codex it has no
@@ -269,9 +280,10 @@ All settings are accessible from the **Settings** submenu:
 - **Open at Login** — start the app at login
 - **Notifications** — 100% alerts, usage limit alerts, reset alarms, and sounds
 - **Track Codex Usage** — fetch and display Codex usage (on by default; turning it off hides the Codex section and returns the menu bar to Claude)
+- **Codex Credit Price** — dollars per Codex credit used to price the overage estimate ($0.04 by default; $0.03, $0.05, or Custom…)
 - **Track Cursor Usage** — fetch and display Cursor usage (on by default; turning it off hides the Cursor section)
 - **Track Opencode** — read and display opencode spend (on by default; turning it off hides the Opencode section)
-- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly — Cursor: Cursor Models, Other Models)
+- **More** — pin or unpin categories, grouped by provider (Claude: 5-hour, Weekly, Model, Extra, Opus, Sonnet, OAuth Apps, Cowork — Codex: 5-hour, Weekly, Extra — Cursor: Cursor Models, Other Models)
 - **Debug Mode** — copy the latest Claude, Codex, or Cursor request/response as formatted JSON, or copy a `curl` command that uses `CC_TOKEN` from Keychain (handy for reproducing calls in the terminal)
 - **Export Data** — save your full usage history (rolling samples + daily peak summaries) as a JSON file for custom analysis
 
