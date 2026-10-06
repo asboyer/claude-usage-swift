@@ -14,6 +14,20 @@ struct CloneState: Equatable {
     let upstreamBranch: String?
     /// Commits on HEAD that the upstream branch lacks, or nil when that could not be counted.
     let unpushedCommitCount: Int?
+    /// The latest upstream commit is already part of the commit this app was built from, as when
+    /// the app was built from a branch ahead of master. False when git can't tell, for example
+    /// because the clone hasn't fetched that commit yet.
+    let buildIncludesLatest: Bool
+}
+
+/// Why the app won't pull into the clone itself.
+enum CloneBlockReason: Equatable {
+    case detachedHead
+    case otherBranch(String)
+    case uncommittedChanges
+    case unpushedCommits
+    /// Pulls from a fork, another branch, or nothing.
+    case notTrackingUpstream
 }
 
 // MARK: - Update Status
@@ -63,18 +77,54 @@ enum UpdateCore {
     }
 
     /// Decides what to offer, given the commit this app was built from and the latest upstream one.
+    /// A different hash is not necessarily a newer one: a build ahead of `branch` is up to date.
     static func status(builtHash: String, latestHash: String, clone: CloneState, branch: String)
         -> UpdateStatus
     {
-        if builtHash.lowercased() == latestHash.lowercased() { return .upToDate }
-        let pullsUpstream =
-            clone.branch == branch
-            && !clone.hasUncommittedChanges
-            && clone.upstreamBranch == branch
-            && clone.upstreamRemoteURL.map(isUpstreamRepoURL) == true
-            // Unpushed commits mean the pull is a no-op and the rebuild reproduces this build.
-            && clone.unpushedCommitCount == 0
-        return pullsUpstream ? .installable : .cloneHasLocalChanges
+        if builtHash.lowercased() == latestHash.lowercased() || clone.buildIncludesLatest {
+            return .upToDate
+        }
+        return blockReason(clone: clone, branch: branch) == nil ? .installable : .cloneHasLocalChanges
+    }
+
+    /// The first reason `git pull --ff-only` in the clone would not land on the latest `branch`
+    /// commit, or nil when it would.
+    static func blockReason(clone: CloneState, branch: String) -> CloneBlockReason? {
+        guard let current = clone.branch else { return .detachedHead }
+        if current != branch { return .otherBranch(current) }
+        if clone.hasUncommittedChanges { return .uncommittedChanges }
+        if clone.upstreamBranch != branch || clone.upstreamRemoteURL.map(isUpstreamRepoURL) != true {
+            return .notTrackingUpstream
+        }
+        // Unpushed commits mean the pull is a no-op and the rebuild reproduces this build.
+        // A count git could not produce (nil) is treated the same, so that clone is never pulled.
+        if clone.unpushedCommitCount != 0 { return .unpushedCommits }
+        return nil
+    }
+
+    /// Says in plain words why the app left the clone alone, and what to do instead.
+    static func blockedMessage(reason: CloneBlockReason, clonePath: String, branch: String) -> String {
+        let repo = "\(repoOwner)/\(repoName)"
+        let problem: String
+        switch reason {
+        case .detachedHead:
+            problem = "Your clone at \(clonePath) isn't on a branch, so the app won't pull into it."
+        case .otherBranch(let current):
+            problem =
+                "Your clone at \(clonePath) is on the \(current) branch, not \(branch), "
+                + "so the app won't switch branches for you."
+        case .uncommittedChanges:
+            problem = "Your clone at \(clonePath) has uncommitted changes, so the app won't pull into it."
+        case .unpushedCommits:
+            problem =
+                "Your clone at \(clonePath) has commits that aren't on \(repo), "
+                + "so pulling wouldn't change the app."
+        case .notTrackingUpstream:
+            problem =
+                "Your clone at \(clonePath) doesn't pull \(branch) from \(repo) "
+                + "(it may be a fork), so pulling wouldn't get this update."
+        }
+        return problem + " Update the clone yourself, then run ./update.sh."
     }
 
     /// The menu row for a status, or nil when there is nothing to offer.

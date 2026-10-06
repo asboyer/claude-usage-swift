@@ -75,9 +75,10 @@ private func runGit(_ args: [String], in clone: String) -> String? {
     return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-/// Reads the clone's branch, uncommitted changes, and upstream. Blocks; call off the main thread.
+/// Reads the clone's branch, uncommitted changes, and upstream, and whether the build already
+/// contains `latestHash`. Blocks; call off the main thread.
 /// Nil when the clone is gone or is not a git checkout.
-func inspectClone(at clone: String) -> CloneState? {
+func inspectClone(at clone: String, builtHash: String, latestHash: String) -> CloneState? {
     guard runGit(["rev-parse", "--is-inside-work-tree"], in: clone) == "true" else { return nil }
     let branch = runGit(["symbolic-ref", "--short", "-q", "HEAD"], in: clone)
     let status = runGit(["status", "--porcelain", "--untracked-files=no"], in: clone)
@@ -92,6 +93,10 @@ func inspectClone(at clone: String) -> CloneState? {
             .flatMap(UpdateCore.branchName(fromMergeRef:))
     }
     let unpushed = runGit(["rev-list", "--count", "@{upstream}..HEAD"], in: clone).flatMap { Int($0) }
+    // Exits 0 only when latestHash is an ancestor of (or equal to) builtHash. An unknown commit
+    // exits non-zero, which falls back to treating the latest commit as new.
+    let buildIncludesLatest =
+        runGit(["merge-base", "--is-ancestor", latestHash, builtHash], in: clone) != nil
 
     return CloneState(
         branch: branch,
@@ -99,7 +104,8 @@ func inspectClone(at clone: String) -> CloneState? {
         hasUncommittedChanges: status.map { !$0.isEmpty } ?? true,
         upstreamRemoteURL: remoteURL,
         upstreamBranch: upstreamBranch,
-        unpushedCommitCount: unpushed
+        unpushedCommitCount: unpushed,
+        buildIncludesLatest: buildIncludesLatest
     )
 }
 

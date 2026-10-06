@@ -107,7 +107,7 @@ This script:
 
 ### From the app
 
-If you built the app from a clone, it updates itself. At launch and every 6 hours it asks GitHub for the newest commit on `master` (an unauthenticated request to `api.github.com` that sends nothing about you), and compares it with the commit it was built from. **Help → Check for Updates…** checks right away.
+If you built the app from a clone, it updates itself. At launch and every 6 hours it asks GitHub for the newest commit on `master` (an unauthenticated request to `api.github.com` that sends nothing about you), and compares it with the commit it was built from. A build that already contains that commit, such as one from a branch ahead of `master`, counts as up to date. **Help → Check for Updates…** checks right away.
 
 When `master` has a newer commit, the menu shows one of:
 

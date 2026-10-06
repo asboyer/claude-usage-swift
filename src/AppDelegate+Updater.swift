@@ -34,7 +34,9 @@ extension AppDelegate {
         guard let source = buildSource, updateMenuState != .installing else { return }
         fetchLatestCommitHash(branch: source.updateBranch) { [weak self] latest in
             // Runs on URLSession's queue, so the git calls stay off the main thread.
-            let clone = latest.flatMap { _ in inspectClone(at: source.clonePath) }
+            let clone = latest.flatMap {
+                inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: $0)
+            }
             DispatchQueue.main.async {
                 self?.applyUpdateCheck(latest: latest, clone: clone, userInitiated: userInitiated)
             }
@@ -72,16 +74,17 @@ extension AppDelegate {
             refreshUpdateItem()
         }
         if userInitiated {
-            presentCheckResult(status, source: source)
+            presentCheckResult(status, clone: clone, source: source)
         }
     }
 
-    private func presentCheckResult(_ status: UpdateStatus, source: BuildSource) {
+    private func presentCheckResult(_ status: UpdateStatus, clone: CloneState, source: BuildSource) {
         switch status {
         case .upToDate:
             showUpdateAlert(
                 title: "Claude Usage is up to date",
-                message: "Built from \(source.commitHash.prefix(7)), the latest commit on \(source.updateBranch).")
+                message: "Built from \(source.commitHash.prefix(7)), which includes the latest commit on "
+                    + "\(source.updateBranch).")
         case .installable:
             let install = showUpdateAlert(
                 title: "An update is available",
@@ -92,16 +95,13 @@ extension AppDelegate {
         case .cloneHasLocalChanges:
             let reveal = showUpdateAlert(
                 title: "An update is available",
-                message: cloneBlockedMessage(source: source),
+                message: UpdateCore.blockedMessage(
+                    reason: UpdateCore.blockReason(clone: clone, branch: source.updateBranch)
+                        ?? .notTrackingUpstream,
+                    clonePath: source.clonePath, branch: source.updateBranch),
                 buttons: ["Show in Finder", "OK"])
             if reveal == .alertFirstButtonReturn { revealClone() }
         }
-    }
-
-    private func cloneBlockedMessage(source: BuildSource) -> String {
-        "The clone at \(source.clonePath) isn't a clean \(source.updateBranch) that tracks "
-            + "\(UpdateCore.repoOwner)/\(UpdateCore.repoName), so the app won't pull into it. "
-            + "Update it yourself, then run ./update.sh."
     }
 
     @objc func updateItemClicked() {
@@ -119,7 +119,8 @@ extension AppDelegate {
     /// Re-reads the clone first: the last check may be hours old.
     func installUpdate() {
         guard let source = buildSource, let latest = latestUpdateHash else { return }
-        guard let clone = inspectClone(at: source.clonePath) else {
+        guard let clone = inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: latest)
+        else {
             updateMenuState = .hidden
             refreshUpdateItem()
             return
