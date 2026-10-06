@@ -35,7 +35,9 @@ extension AppDelegate {
         fetchLatestCommitHash(branch: source.updateBranch) { [weak self] latest in
             // Runs on URLSession's queue, so the git calls stay off the main thread.
             let clone = latest.flatMap {
-                inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: $0)
+                inspectClone(
+                    at: source.clonePath, updateBranch: source.updateBranch, builtHash: source.commitHash,
+                    latestHash: $0)
             }
             DispatchQueue.main.async {
                 self?.applyUpdateCheck(latest: latest, clone: clone, userInitiated: userInitiated)
@@ -88,10 +90,10 @@ extension AppDelegate {
         case .installable:
             let install = showUpdateAlert(
                 title: "An update is available",
-                message: "Installing pulls \(source.updateBranch) in \(source.clonePath), rebuilds, "
-                    + "and relaunches the app.",
+                message: UpdateCore.installMessage(
+                    clone: clone, clonePath: source.clonePath, branch: source.updateBranch),
                 buttons: ["Install", "Later"])
-            if install == .alertFirstButtonReturn { installUpdate() }
+            if install == .alertFirstButtonReturn { installUpdate(confirmed: true) }
         case .cloneHasLocalChanges:
             let reveal = showUpdateAlert(
                 title: "An update is available",
@@ -116,10 +118,14 @@ extension AppDelegate {
         }
     }
 
-    /// Re-reads the clone first: the last check may be hours old.
-    func installUpdate() {
+    /// Re-reads the clone first: the last check may be hours old. `confirmed` means the user already
+    /// saw what Install does to the clone.
+    func installUpdate(confirmed: Bool = false) {
         guard let source = buildSource, let latest = latestUpdateHash else { return }
-        guard let clone = inspectClone(at: source.clonePath, builtHash: source.commitHash, latestHash: latest)
+        guard
+            let clone = inspectClone(
+                at: source.clonePath, updateBranch: source.updateBranch, builtHash: source.commitHash,
+                latestHash: latest)
         else {
             updateMenuState = .hidden
             refreshUpdateItem()
@@ -134,6 +140,15 @@ extension AppDelegate {
             updateMenuState = .available(.cloneHasLocalChanges)
             revealClone()
         case .installable:
+            // Building another branch leaves that branch's changes out of the app, so say so first.
+            if !confirmed && clone.branch != source.updateBranch {
+                let install = showUpdateAlert(
+                    title: "Install the update?",
+                    message: UpdateCore.installMessage(
+                        clone: clone, clonePath: source.clonePath, branch: source.updateBranch),
+                    buttons: ["Install", "Cancel"])
+                guard install == .alertFirstButtonReturn else { return }
+            }
             updateMenuState = .installing
             let started = startUpdateInstall(source: source) { [weak self] in
                 self?.updateMenuState = .failed
