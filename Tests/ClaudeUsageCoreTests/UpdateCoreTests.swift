@@ -145,72 +145,60 @@ struct UpdateCoreTests {
 
     // MARK: - blockedMessage
 
-    @Test func uncommittedMessageSaysHowToUnblock() {
-        let message = UpdateCore.blockedMessage(reason: .uncommittedChanges, clonePath: "/clone", branch: "master")
+    @Test func blockedMessagesAreTwoShortLines() {
         #expect(
-            message
-                == "Your clone at /clone has uncommitted changes, so the app can't switch to master and back "
-                + "without touching them. Commit or stash them, then check for updates again.")
-    }
-
-    @Test func unpushedMessageNamesTheUpdateBranch() {
-        let message = UpdateCore.blockedMessage(reason: .unpushedCommits, clonePath: "/clone", branch: "master")
+            UpdateCore.blockedMessage(reason: .uncommittedChanges, branch: "master")
+                == "Your clone has uncommitted changes.\nCommit or stash them, then check again.")
         #expect(
-            message
-                == "The master branch in your clone at /clone has commits that aren't on "
-                + "asboyer/claude-usage-swift, so it can't be fast-forwarded. "
-                + "Update the clone yourself, then run ./update.sh.")
-    }
-
-    @Test func notTrackingMessageMentionsForks() {
-        let message = UpdateCore.blockedMessage(
-            reason: .notTrackingUpstream, clonePath: "/clone", branch: "master")
-        #expect(message.contains("(it may be a fork)"))
-        #expect(message.hasSuffix(" Update the clone yourself, then run ./update.sh."))
+            UpdateCore.blockedMessage(reason: .unpushedCommits, branch: "master")
+                == "Your local master has commits that aren't on GitHub.\nUpdate it yourself, then run ./update.sh.")
+        #expect(
+            UpdateCore.blockedMessage(reason: .notTrackingUpstream, branch: "master")
+                == "Your local master is missing or tracks a fork.\nUpdate it yourself, then run ./update.sh.")
     }
 
     // MARK: - installMessage
 
-    @Test func installMessageOnTheUpdateBranchJustPulls() {
-        let message = UpdateCore.installMessage(clone: clone(), clonePath: "/clone", branch: "master")
-        #expect(message == "Installing pulls master in /clone, rebuilds, and relaunches the app.")
+    @Test func installMessageOnTheUpdateBranchIsOneLine() {
+        let message = UpdateCore.installMessage(clone: clone(), branch: "master")
+        #expect(message == "Claude Usage will pull the latest master, rebuild, and restart.")
     }
 
-    @Test func installMessageFromABranchAheadOfMasterCountsWhatIsLeftOut() {
+    @Test func installMessageFromABranchAheadOfMasterSaysWhatIsLeftOut() {
         let message = UpdateCore.installMessage(
-            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 3), clonePath: "/clone", branch: "master")
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 3), branch: "master")
         #expect(
             message
-                == "Installing switches your clone at /clone to master, pulls, rebuilds, and relaunches the "
-                + "app, then switches back to feat/x. 3 commits on feat/x aren't on master. The new app is "
-                + "built from master, so it won't include those commits.")
+                == """
+                Claude Usage will rebuild from master and restart.
+                Your clone switches to master, then back to feat/x.
+                3 commits on feat/x won't be in the new app.
+                """)
     }
 
     @Test func installMessageUsesSingularForOneCommit() {
         let message = UpdateCore.installMessage(
-            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 1), clonePath: "/clone", branch: "master")
-        let expected =
-            " 1 commit on feat/x isn't on master. The new app is built from master, so it won't include that commit."
-        #expect(message.hasSuffix(expected))
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 1), branch: "master")
+        #expect(message.hasSuffix("\n1 commit on feat/x won't be in the new app."))
     }
 
-    @Test func installMessageFromABranchWithNothingNewLeavesNothingOut() {
+    @Test func installMessageFromABranchWithNothingNewIsTwoLines() {
         let message = UpdateCore.installMessage(
-            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 0), clonePath: "/clone", branch: "master")
-        #expect(message.hasSuffix("then switches back to feat/x."))
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: 0), branch: "master")
+        #expect(message.hasSuffix("then back to feat/x."))
     }
 
     @Test func installMessageWhenTheCountIsUnknownStillWarns() {
         let message = UpdateCore.installMessage(
-            clone: clone(branch: "feat/x", aheadOfUpdateBranch: nil), clonePath: "/clone", branch: "master")
-        #expect(message.hasSuffix(" so it won't include any commits on feat/x that aren't on master."))
+            clone: clone(branch: "feat/x", aheadOfUpdateBranch: nil), branch: "master")
+        #expect(message.hasSuffix("\nCommits on feat/x won't be in the new app."))
     }
 
     @Test func installMessageFromADetachedHeadSwitchesBackToTheCommit() {
         let message = UpdateCore.installMessage(
-            clone: clone(branch: nil, aheadOfUpdateBranch: 2), clonePath: "/clone", branch: "master")
-        #expect(message.contains("then switches back to the commit you have checked out."))
-        #expect(message.contains(" 2 commits in what you have checked out aren't on master."))
+            clone: clone(branch: nil, aheadOfUpdateBranch: 2), branch: "master")
+        #expect(message.contains("then back to the current commit."))
+        #expect(message.hasSuffix("\n2 commits not on master won't be in the new app."))
     }
 
     // MARK: - menuTitle

@@ -63,7 +63,7 @@ extension AppDelegate {
             if userInitiated {
                 showUpdateAlert(
                     title: "Can't find the clone",
-                    message: "This app was built from \(source.clonePath), which is no longer a git clone.")
+                    message: "This app was built from a clone that's gone:\n\(source.clonePath)")
             }
             return
         }
@@ -84,14 +84,12 @@ extension AppDelegate {
         switch status {
         case .upToDate:
             showUpdateAlert(
-                title: "Claude Usage is up to date",
-                message: "Built from \(source.commitHash.prefix(7)), which includes the latest commit on "
-                    + "\(source.updateBranch).")
+                title: "You're up to date",
+                message: "Built from \(source.commitHash.prefix(7)).")
         case .installable:
             let install = showUpdateAlert(
-                title: "An update is available",
-                message: UpdateCore.installMessage(
-                    clone: clone, clonePath: source.clonePath, branch: source.updateBranch),
+                title: "Update available",
+                message: UpdateCore.installMessage(clone: clone, branch: source.updateBranch),
                 buttons: ["Install", "Later"])
             if install == .alertFirstButtonReturn { installUpdate(confirmed: true) }
         case .blocked(let reason):
@@ -101,14 +99,13 @@ extension AppDelegate {
 
     /// Finder is offered only for uncommitted changes, the one case the user fixes in the clone.
     private func explainBlocked(_ reason: CloneBlockReason, source: BuildSource) {
-        let message = UpdateCore.blockedMessage(
-            reason: reason, clonePath: source.clonePath, branch: source.updateBranch)
+        let message = UpdateCore.blockedMessage(reason: reason, branch: source.updateBranch)
         if reason == .uncommittedChanges {
             let reveal = showUpdateAlert(
-                title: "An update is available", message: message, buttons: ["Show in Finder", "OK"])
+                title: "Update available", message: message, buttons: ["Show in Finder", "OK"])
             if reveal == .alertFirstButtonReturn { revealClone() }
         } else {
-            showUpdateAlert(title: "An update is available", message: message)
+            showUpdateAlert(title: "Update available", message: message)
         }
     }
 
@@ -155,9 +152,8 @@ extension AppDelegate {
             // Building another branch leaves that branch's changes out of the app, so say so first.
             if !confirmed && clone.branch != source.updateBranch {
                 let install = showUpdateAlert(
-                    title: "Install the update?",
-                    message: UpdateCore.installMessage(
-                        clone: clone, clonePath: source.clonePath, branch: source.updateBranch),
+                    title: "Install update?",
+                    message: UpdateCore.installMessage(clone: clone, branch: source.updateBranch),
                     buttons: ["Install", "Cancel"])
                 guard install == .alertFirstButtonReturn else { return }
             }

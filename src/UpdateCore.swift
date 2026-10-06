@@ -107,52 +107,42 @@ enum UpdateCore {
         return nil
     }
 
-    /// Says in plain words why the app left the clone alone, and what to do instead.
-    static func blockedMessage(reason: CloneBlockReason, clonePath: String, branch: String) -> String {
-        let repo = "\(repoOwner)/\(repoName)"
-        let problem: String
+    /// Why the app left the clone alone, and what to do: one short line each.
+    static func blockedMessage(reason: CloneBlockReason, branch: String) -> String {
         switch reason {
         case .uncommittedChanges:
-            // The one case the user can fix in place, after which the app installs by itself.
-            return "Your clone at \(clonePath) has uncommitted changes, so the app can't switch to "
-                + "\(branch) and back without touching them. Commit or stash them, then check for "
-                + "updates again."
+            return "Your clone has uncommitted changes.\nCommit or stash them, then check again."
         case .unpushedCommits:
-            problem =
-                "The \(branch) branch in your clone at \(clonePath) has commits that aren't on "
-                + "\(repo), so it can't be fast-forwarded."
+            return "Your local \(branch) has commits that aren't on GitHub.\n"
+                + "Update it yourself, then run ./update.sh."
         case .notTrackingUpstream:
-            problem =
-                "The \(branch) branch in your clone at \(clonePath) is missing or doesn't pull from "
-                + "\(repo) (it may be a fork), so pulling wouldn't get this update."
+            return "Your local \(branch) is missing or tracks a fork.\n"
+                + "Update it yourself, then run ./update.sh."
         }
-        return problem + " Update the clone yourself, then run ./update.sh."
     }
 
-    /// Says what Install will do to the clone. When the clone is on another branch, the install
-    /// builds `branch` and switches back, so the new app lacks that branch's own commits.
-    static func installMessage(clone: CloneState, clonePath: String, branch: String) -> String {
+    /// What Install will do, one short line each. From another branch it also says what the new
+    /// app leaves out, since it is built from `branch`.
+    static func installMessage(clone: CloneState, branch: String) -> String {
         if clone.branch == branch {
-            return "Installing pulls \(branch) in \(clonePath), rebuilds, and relaunches the app."
+            return "Claude Usage will pull the latest \(branch), rebuild, and restart."
         }
-        let current = clone.branch ?? "the commit you have checked out"
-        let place = clone.branch.map { "on \($0)" } ?? "in what you have checked out"
-        let steps =
-            "Installing switches your clone at \(clonePath) to \(branch), pulls, rebuilds, and "
-            + "relaunches the app, then switches back to \(current)."
+        var lines = [
+            "Claude Usage will rebuild from \(branch) and restart.",
+            "Your clone switches to \(branch), then back to \(clone.branch ?? "the current commit").",
+        ]
+        let source = clone.branch.map { "on \($0)" } ?? "not on \(branch)"
         switch clone.commitsNotOnUpdateBranch {
         case 0:
-            return steps
+            break
         case 1:
-            return steps + " 1 commit \(place) isn't on \(branch). The new app is built from \(branch), "
-                + "so it won't include that commit."
+            lines.append("1 commit \(source) won't be in the new app.")
         case .some(let count):
-            return steps + " \(count) commits \(place) aren't on \(branch). The new app is built from "
-                + "\(branch), so it won't include those commits."
+            lines.append("\(count) commits \(source) won't be in the new app.")
         case nil:
-            return steps + " The new app is built from \(branch), so it won't include any commits "
-                + "\(place) that aren't on \(branch)."
+            lines.append("Commits \(source) won't be in the new app.")
         }
+        return lines.joined(separator: "\n")
     }
 
     /// The menu row for a status, or nil when there is nothing to offer.
