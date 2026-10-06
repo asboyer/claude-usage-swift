@@ -100,15 +100,23 @@ For quicker local updates during development, you can use the included `update.s
 
 This script:
 
+- Runs `./build.sh`, and stops there if the build fails, leaving the installed app running
 - Quits any running `ClaudeUsage` process
-- Removes `/Applications/ClaudeUsage.app`
-- Runs `./build.sh`
-- Moves the new `ClaudeUsage.app` into `/Applications/`
+- Replaces `/Applications/ClaudeUsage.app` with the new build
 - Opens `/Applications/ClaudeUsage.app`
 
 ### From the app
 
-In the menu bar app, go to **Help → Update…** to open this **Updating** section on GitHub in your browser.
+If you built the app from a clone, it updates itself. At launch and every 6 hours it asks GitHub for the newest commit on `master` (an unauthenticated request to `api.github.com` that sends nothing about you), and compares it with the commit it was built from. A build that already contains that commit, such as one from a branch ahead of `master`, counts as up to date. **Help → Check for Updates…** checks right away.
+
+When `master` has a newer commit, the menu shows one of:
+
+- **Update available — click to install**: your clone is on `master`, tracks this repo, and has no uncommitted or unpushed changes. Clicking runs `git pull --ff-only && ./update.sh` in the clone, which rebuilds, quits, replaces, and relaunches the app.
+- **Update available (clone has local changes)**: your clone is on another branch, has local changes, or tracks a fork. Clicking opens the clone in Finder and changes nothing; update it yourself, then run `./update.sh`.
+
+The install's output goes to `~/Library/Application Support/ClaudeUsage/update.log`. If it fails, the old app keeps running and the menu shows **Update failed — see log**.
+
+A copy that wasn't built from a git clone (for example, one built from a downloaded zip) can't update itself; use the steps above.
 
 ## How It Works
 
