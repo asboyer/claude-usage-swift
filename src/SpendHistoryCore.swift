@@ -43,7 +43,6 @@ struct ClaudeExtraIncrease: Codable, Equatable {
 struct ClaudeExtraReading: Codable, Equatable {
     let at: Date
     let dollars: Double
-    let month: String
 }
 
 /// Daily extra spend kept by the app itself. Claude Code deletes transcripts after 30 days, and
@@ -61,6 +60,9 @@ struct SpendLedger: Codable, Equatable {
     var lastScan: Date?
     /// Kept apart from `lastScan`: a provider switched on later needs its first scan in full.
     var lastCodexScan: Date?
+    /// The latest limit reading any scan has seen. An incremental scan skips older session files, so
+    /// a request early in a new session is judged against this when nothing it read comes before it.
+    var lastCodexReading: CodexLimitReading?
 
     /// Keeps, per day and model, whichever entry of `provider` covers more tokens. A scan only ever
     /// sees fewer tokens for a day than before once older session files have been deleted, or when
@@ -77,6 +79,16 @@ struct SpendLedger: Codable, Equatable {
         }
     }
 
+    /// Merges the Codex overage found in one scan, judging each request against the readings the scan
+    /// read plus the latest one an earlier scan saw.
+    mutating func mergeCodexScan(
+        requests: [CodexModelRequest], readings: [CodexLimitReading], calendar: Calendar = .current
+    ) {
+        let all = readings + [lastCodexReading].compactMap { $0 }
+        merge(.codex, days: SpendLedgerBuilder.codexDays(requests: requests, readings: all, calendar: calendar))
+        lastCodexReading = all.max { $0.timestamp < $1.timestamp }
+    }
+
     /// Claude attributions are final once made, so they add rather than replace.
     mutating func add(days attributed: SpendDays) {
         for (day, providers) in attributed {
@@ -89,10 +101,9 @@ struct SpendLedger: Codable, Equatable {
     }
 
     /// Turns a new reading of Claude's monthly Extra total into an increase over the last one. The
-    /// API resets the total on its own schedule (UTC or billing date), so the local month alone
-    /// never marks a reset: a drop does, once the next reading confirms it.
-    mutating func recordClaudeExtra(dollars: Double, at now: Date, calendar: Calendar = .current) {
-        let reading = ClaudeExtraReading(at: now, dollars: dollars, month: SpendLedgerBuilder.monthKey(now, calendar: calendar))
+    /// API resets the total at the start of each UTC month, whatever the local time zone.
+    mutating func recordClaudeExtra(dollars: Double, at now: Date) {
+        let reading = ClaudeExtraReading(at: now, dollars: dollars)
         claudeTrackedSince = claudeTrackedSince ?? now
         guard let previous = lastClaudeExtra else {
             lastClaudeExtra = reading
@@ -100,11 +111,13 @@ struct SpendLedger: Codable, Equatable {
             if dollars > 0 { pendingClaudeExtra.append(ClaudeExtraIncrease(start: nil, end: now, dollars: dollars)) }
             return
         }
-        // Readings more than 36 hours apart across a month boundary straddle a reset in any time zone.
-        if previous.month != reading.month && now.timeIntervalSince(previous.at) > 36 * 3600 {
-            lastClaudeExtra = reading
+        // Across a reset the whole total is new spend. Within its first hour the API may still report
+        // the old total, so a reading that early is left to the drop check below.
+        let reset = Self.utcMonthStart(containing: now)
+        if previous.at < reset && now.timeIntervalSince(reset) > 3600 {
             claudeExtraDip = nil
-            if dollars > 0 { pendingClaudeExtra.append(ClaudeExtraIncrease(start: nil, end: now, dollars: dollars)) }
+            lastClaudeExtra = reading
+            appendClaudeExtra(start: max(previous.at, reset), end: now, dollars: dollars)
             return
         }
         if dollars >= previous.dollars {
@@ -131,20 +144,23 @@ struct SpendLedger: Codable, Equatable {
             pendingClaudeExtra.append(ClaudeExtraIncrease(start: start, end: end, dollars: dollars))
         }
     }
+
+    static func utcMonthStart(containing date: Date) -> Date {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        return utc.dateInterval(of: .month, for: date)?.start ?? date
+    }
 }
 
 enum SpendLedgerBuilder {
-    /// Model name for Claude spend the app cannot place on a model.
+    /// Model name for Claude spend billed before the app's first reading.
     static let beforeTracking = "Before tracking"
+    /// Model name for Claude spend billed while Claude Code on this Mac sent no requests.
+    static let unmatched = "Unmatched"
 
     static func dayKey(_ date: Date, calendar: Calendar) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
-    }
-
-    static func monthKey(_ date: Date, calendar: Calendar) -> String {
-        let parts = calendar.dateComponents([.year, .month], from: date)
-        return String(format: "%04d-%02d", parts.year ?? 0, parts.month ?? 0)
     }
 
     private static func add(
@@ -189,8 +205,7 @@ enum SpendLedgerBuilder {
     }
 
     /// Splits each Claude increase across the requests sent while it accrued, by their cost at API
-    /// rates, which is how Extra usage is billed. An increase with no known start or no requests
-    /// in its window lands on its end day as "Before tracking".
+    /// rates, which is how Extra usage is billed. One that cannot be split lands on its end day.
     static func claudeDays(
         increases: [ClaudeExtraIncrease], requests: [TranscriptRequest], calendar: Calendar = .current
     ) -> SpendDays {
@@ -204,8 +219,8 @@ enum SpendLedgerBuilder {
             let cost = window.reduce(0) { $0 + $1.weightedCost }
             guard cost > 0 else {
                 add(
-                    &days, increase.end, .claude, beforeTracking, calendar: calendar,
-                    SpendEntry(dollars: increase.dollars))
+                    &days, increase.end, .claude, increase.start == nil ? beforeTracking : unmatched,
+                    calendar: calendar, SpendEntry(dollars: increase.dollars))
                 continue
             }
             for request in window {

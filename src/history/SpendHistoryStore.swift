@@ -44,8 +44,7 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
         ClaudeCodeTranscripts.recentRequests(windowHours: Int(now.timeIntervalSince(start) / 3600) + 1, now: now)
     } ?? []
     let codexCutoff = saved.lastCodexScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0) } ?? .distantPast
-    let codex = includeCodex ? scanCodexSessions(modifiedSince: codexCutoff) : (requests: [], readings: [])
-    let codexExtra = SpendLedgerBuilder.codexDays(requests: codex.requests, readings: codex.readings)
+    let codex = includeCodex ? scanCodexSessions(modifiedSince: codexCutoff) : nil
     // Opencode keeps its own history, so it is always read in full.
     let opencode = SpendLedgerBuilder.opencodeDays(
         requests: includeOpencode ? fetchOpencodeRequestCosts(since: .distantPast) ?? [] : [])
@@ -58,7 +57,7 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
     let unclaimed = pending.filter { ledger.pendingClaudeExtra.contains($0) }
     ledger.add(days: SpendLedgerBuilder.claudeDays(increases: unclaimed, requests: claude))
     ledger.pendingClaudeExtra.removeAll { unclaimed.contains($0) }
-    ledger.merge(.codex, days: codexExtra)
+    if let codex { ledger.mergeCodexScan(requests: codex.requests, readings: codex.readings) }
     ledger.merge(.opencode, days: opencode)
     ledger.lastScan = now
     if includeCodex { ledger.lastCodexScan = now }
@@ -70,7 +69,9 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
 func recordClaudeExtraSpend(dollars: Double, now: Date = Date()) {
     spendLedgerLock.lock()
     defer { spendLedgerLock.unlock() }
-    var ledger = readSpendLedger()
+    let saved = readSpendLedger()
+    var ledger = saved
     ledger.recordClaudeExtra(dollars: dollars, at: now)
-    writeSpendLedger(ledger)
+    // Most refreshes see no change, and rewriting the file each time would be wasted work.
+    if ledger != saved { writeSpendLedger(ledger) }
 }

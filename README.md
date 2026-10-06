@@ -253,7 +253,9 @@ where each number comes from.
 Codex overage is the same estimate as the Codex Extra row, rebuilt from every session on this Mac. Claude reports
 only the running monthly Extra total, so the app records each rise in it from the first time it runs and splits the
 rise across the Claude Code requests sent in that window by their cost at API rates (how Extra usage is billed);
-spend from before the first reading shows as "Before tracking". Opencode spend is the cost opencode records for
+spend from before the first reading shows as "Before tracking", and spend billed while Claude Code on this Mac sent
+no requests (claude.ai, other devices) as "Unmatched". The total starts over at the beginning of each UTC month.
+Opencode spend is the cost opencode records for
 each pay-per-token request; subscription-billed turns cost nothing there and are left out.
 
 The app keeps its own daily ledger, because Claude Code deletes transcripts after 30 days. The first scan reads every

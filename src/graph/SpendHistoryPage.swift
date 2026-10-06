@@ -57,12 +57,18 @@ private func context(_ periods: [SpendPeriod], index: Int, granularity: SpendGra
     return parts.joined(separator: " · ")
 }
 
+/// Why the Claude rows that are not a model cannot be split by model.
+private let unsplitClaudeNotes = [
+    SpendLedgerBuilder.beforeTracking:
+        "Claude Extra billed this month before the app started recording it, so it cannot be split by model.",
+    SpendLedgerBuilder.unmatched:
+        "Claude Extra billed while Claude Code on this Mac sent no requests, as from claude.ai or another device, "
+        + "so it cannot be split by model.",
+]
+
 private func modelLines(_ total: SpendProviderTotal) -> String {
     return total.models.map { model in
-        let name =
-            model.model == SpendLedgerBuilder.beforeTracking
-            ? "\(model.model) \(info("Claude Extra billed this month before the app started recording it, so it cannot be split by model."))"
-            : model.model.htmlEscaped
+        let name = model.model.htmlEscaped + (unsplitClaudeNotes[model.model].map { " " + info($0) } ?? "")
         let share = model.tokenShare > 0 ? CodexOverageCore.formatShare(model.tokenShare) + " of tokens" : ""
         return """
             <div class="model"><span class="model-name">\(name)</span>\

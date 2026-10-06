@@ -670,14 +670,15 @@ extension AppDelegate {
     /// Keeps the ledger ahead of Claude Code's transcript cleanup even if the panel is never opened.
     func rescanSpendLedgerIfStale() {
         guard !spendLedgerScanInFlight else { return }
-        if let lastScan = loadSpendLedger().lastScan, Date().timeIntervalSince(lastScan) < spendLedgerRescanInterval {
-            return
-        }
         spendLedgerScanInFlight = true
         let includeCodex = codexTrackingEnabled
         let includeOpencode = opencodeTrackingEnabled
+        // The ledger is read off the main thread too, since it grows with every day of history.
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            rescanSpendLedger(includeCodex: includeCodex, includeOpencode: includeOpencode)
+            let lastScan = loadSpendLedger().lastScan
+            if lastScan.map({ Date().timeIntervalSince($0) >= spendLedgerRescanInterval }) ?? true {
+                rescanSpendLedger(includeCodex: includeCodex, includeOpencode: includeOpencode)
+            }
             DispatchQueue.main.async { self?.spendLedgerScanInFlight = false }
         }
     }

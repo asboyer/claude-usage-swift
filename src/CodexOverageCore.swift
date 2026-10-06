@@ -70,13 +70,13 @@ struct CodexModelRequest: Equatable {
     }
 }
 
-struct CodexLimitWindow: Equatable {
+struct CodexLimitWindow: Codable, Equatable {
     let usedPercent: Double
     let resetsAt: Date?
 }
 
 /// The account's 5-hour and weekly readings as Codex logged them after a response.
-struct CodexLimitReading: Equatable {
+struct CodexLimitReading: Codable, Equatable {
     let timestamp: Date
     let windows: [CodexLimitWindow]
 
@@ -357,9 +357,10 @@ enum CodexOverageCore {
         return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
     }
 
-    /// Whole percent, with "<1%" so a small but real share does not read as none.
+    /// Whole percent, with "<1%" and ">99%" so a share never reads as none or all when it is not.
     static func formatShare(_ share: Double) -> String {
         if share > 0 && share <= 0.005 { return "<1%" }
+        if share < 1 && share >= 0.995 { return ">99%" }
         return String(format: "%.0f%%", share * 100)
     }
 

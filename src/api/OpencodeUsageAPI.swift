@@ -33,10 +33,17 @@ func fetchOpencodeUsage(completion: @escaping (OpencodeUsage?) -> Void) {
     completion(OpencodeUsage(models: OpencodeUsageCore.rank(costsByModel), monthStart: monthStart))
 }
 
-/// Every completed, paid assistant turn since `cutoff`, for the spend history.
+/// Every completed, paid assistant turn since `cutoff`, for the spend history. Older opencode
+/// versions record no token total, so it is summed from the parts.
 private let opencodeRequestQuery = """
     SELECT time_created, json_extract(data, '$.modelID'),
-           COALESCE(json_extract(data, '$.tokens.total'), 0), json_extract(data, '$.cost')
+           COALESCE(json_extract(data, '$.tokens.total'),
+                    COALESCE(json_extract(data, '$.tokens.input'), 0)
+                    + COALESCE(json_extract(data, '$.tokens.output'), 0)
+                    + COALESCE(json_extract(data, '$.tokens.reasoning'), 0)
+                    + COALESCE(json_extract(data, '$.tokens.cache.read'), 0)
+                    + COALESCE(json_extract(data, '$.tokens.cache.write'), 0)),
+           json_extract(data, '$.cost')
     FROM message
     WHERE time_created >= ?
       AND json_extract(data, '$.role') = 'assistant'
