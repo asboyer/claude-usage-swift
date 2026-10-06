@@ -93,7 +93,8 @@ func inspectClone(at clone: String, updateBranch: String, builtHash: String, lat
     }
     let upstreamBranch = runGit(["config", "--get", "branch.\(updateBranch).merge"], in: clone)
         .flatMap(UpdateCore.branchName(fromMergeRef:))
-    let upstreamRef = "refs/heads/\(updateBranch)@{upstream}"
+    // `@{upstream}` needs the short branch name; `refs/heads/<name>@{upstream}` is an error.
+    let upstreamRef = "\(updateBranch)@{upstream}"
     let unpushed = runGit(["rev-list", "--count", "\(upstreamRef)..refs/heads/\(updateBranch)"], in: clone)
         .flatMap { Int($0) }
     let notOnUpdateBranch = runGit(["rev-list", "--count", "\(upstreamRef)..HEAD"], in: clone)
