@@ -21,6 +21,7 @@ let package = Package(
                 "AppConstants.swift",
                 "ClaudeUsage.swift",
                 "AppDelegate+MenuAndRefresh.swift",
+                "AppDelegate+Updater.swift",
                 "TimeFormatting.swift",
                 "SoundPlayback.swift",
                 "api",
@@ -30,7 +31,7 @@ let package = Package(
             sources: [
                 "UsageCore.swift", "CodexUsageCore.swift", "CodexOverageCore.swift", "OpencodeUsageCore.swift",
                 "KeychainCredentials.swift", "UsageBreakdownCore.swift",
-                "ClaudeCodeTranscripts.swift",
+                "ClaudeCodeTranscripts.swift", "UpdateCore.swift",
             ]
         ),
         .testTarget(
