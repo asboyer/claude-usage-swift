@@ -1429,17 +1429,39 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         submenu.addItem(period)
         submenu.addItem(NSMenuItem.separator())
 
-        var rowWidths = [period.attributedTitle?.size().width ?? 0]
-        for model in overage.models {
+        let font = NSFont.menuFont(ofSize: 14)
+        let rows = overage.models.map { model in
             let dollars = CodexOverageCore.formatDollars(model.dollars(pricePerCredit: codexCreditPrice))
             let credits = CodexOverageCore.formatCredits(model.credits)
-            let title = showCodexCredits ? "\(model.model): \(dollars) (\(credits))" : "\(model.model): \(dollars)"
-            let row = NSMenuItem(title: title, action: #selector(noop), keyEquivalent: "")
-            row.target = self
-            row.attributedTitle = tabbedMenuItemString(
-                model.model, showCodexCredits ? "\(dollars)  \(credits)" : "\(dollars)")
-            submenu.addItem(row)
-            rowWidths.append(row.attributedTitle?.size().width ?? 0)
+            let spend = showCodexCredits ? "\(dollars)  \(credits)" : dollars
+            return (model: model.model, spend: spend, share: CodexOverageCore.formatShare(overage.tokenShare(of: model)))
+        }
+        // The token share sits right-aligned past the widest spend, so cost and usage read side by side.
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        // Long model names push the spend column right instead of running into it.
+        let spendColumn = max(140, (rows.map { width($0.model) }.max() ?? 0) + 16)
+        let widestSpend = rows.map { width($0.spend) }.max() ?? 0
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [
+            NSTextTab(textAlignment: .left, location: spendColumn, options: [:]),
+            NSTextTab(textAlignment: .right, location: spendColumn + widestSpend + 64, options: [:]),
+        ]
+
+        var rowWidths = [period.attributedTitle?.size().width ?? 0]
+        for row in rows {
+            let title = "\(row.model): \(row.spend), \(row.share) of tokens"
+            let item = NSMenuItem(title: title, action: #selector(noop), keyEquivalent: "")
+            item.target = self
+            let text = NSMutableAttributedString(
+                string: "\(row.model)\t\(row.spend)\t",
+                attributes: [.paragraphStyle: paragraph, .font: font, .foregroundColor: NSColor.labelColor])
+            text.append(
+                NSAttributedString(
+                    string: row.share,
+                    attributes: [.paragraphStyle: paragraph, .font: font, .foregroundColor: NSColor.secondaryLabelColor]))
+            item.attributedTitle = text
+            submenu.addItem(item)
+            rowWidths.append(text.size().width)
         }
 
         submenu.addItem(NSMenuItem.separator())
@@ -1450,7 +1472,9 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         let info =
             "Estimated from the tokens Codex logged on this Mac for each model request sent while "
             + "a 5-hour or weekly limit was at 100%, during the period shown at the top "
-            + "(Settings › Codex Extra Usage Window). Priced "
+            + "(Settings › Codex Extra Usage Window). The percentage is each model's share of those "
+            + "tokens, cached input included, so a model that mostly reads from cache can show a large "
+            + "share for little spend. Priced "
             + "with OpenAI's Codex credit rates at \(CodexOverageCore.formatPrice(codexCreditPrice)) per "
             + "credit (Settings › Codex Credit Price). Codex Cloud tasks and other devices are not included."
         submenu.addItem(infoFooterItem(footer, info: info, alignedTo: rowWidths.max() ?? 0))
