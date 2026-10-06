@@ -45,9 +45,16 @@ struct UpdateCoreTests {
         #expect(status == .installable)
     }
 
-    @Test func otherBranchIsNotInstallable() {
+    @Test func otherBranchWithCleanMasterIsInstallable() {
+        // The install switches to master, pulls, builds, and switches back.
         let status = UpdateCore.status(
             builtHash: built, latestHash: latest, clone: clone(branch: "feat/x"), branch: "master")
+        #expect(status == .installable)
+    }
+
+    @Test func otherBranchWithUncommittedChangesIsNotInstallable() {
+        let status = UpdateCore.status(
+            builtHash: built, latestHash: latest, clone: clone(branch: "feat/x", dirty: true), branch: "master")
         #expect(status == .cloneHasLocalChanges)
     }
 
@@ -121,9 +128,10 @@ struct UpdateCoreTests {
     @Test func blockReasonNamesTheFirstProblem() {
         #expect(UpdateCore.blockReason(clone: clone(), branch: "master") == nil)
         #expect(UpdateCore.blockReason(clone: clone(branch: nil), branch: "master") == .detachedHead)
+        #expect(UpdateCore.blockReason(clone: clone(branch: "feat/x"), branch: "master") == nil)
         #expect(
             UpdateCore.blockReason(clone: clone(branch: "feat/x", dirty: true), branch: "master")
-                == .otherBranch("feat/x"))
+                == .uncommittedChanges)
         #expect(UpdateCore.blockReason(clone: clone(dirty: true), branch: "master") == .uncommittedChanges)
         #expect(UpdateCore.blockReason(clone: clone(unpushed: 3), branch: "master") == .unpushedCommits)
         #expect(UpdateCore.blockReason(clone: clone(unpushed: nil), branch: "master") == .unpushedCommits)
@@ -139,24 +147,41 @@ struct UpdateCoreTests {
 
     // MARK: - blockedMessage
 
-    @Test func otherBranchMessageNamesBothBranches() {
-        let message = UpdateCore.blockedMessage(
-            reason: .otherBranch("feat/in-app-updater"), clonePath: "/clone", branch: "master")
+    @Test func unpushedMessageNamesTheUpdateBranch() {
+        let message = UpdateCore.blockedMessage(reason: .unpushedCommits, clonePath: "/clone", branch: "master")
         #expect(
             message
-                == "Your clone at /clone is on the feat/in-app-updater branch, not master, "
-                + "so the app won't switch branches for you. Update the clone yourself, then run ./update.sh.")
+                == "The master branch in your clone at /clone has commits that aren't on "
+                + "asboyer/claude-usage-swift, so it can't be fast-forwarded. "
+                + "Update the clone yourself, then run ./update.sh.")
     }
 
     @Test func everyBlockedMessageEndsWithWhatToDo() {
         let reasons: [CloneBlockReason] = [
-            .detachedHead, .otherBranch("x"), .uncommittedChanges, .unpushedCommits, .notTrackingUpstream,
+            .detachedHead, .uncommittedChanges, .unpushedCommits, .notTrackingUpstream,
         ]
         for reason in reasons {
             let message = UpdateCore.blockedMessage(reason: reason, clonePath: "/clone", branch: "master")
-            #expect(message.hasPrefix("Your clone at /clone "))
+            #expect(message.contains(" clone at /clone "))
             #expect(message.hasSuffix(" Update the clone yourself, then run ./update.sh."))
         }
+    }
+
+    // MARK: - installMessage
+
+    @Test func installMessageOnTheUpdateBranchJustPulls() {
+        let message = UpdateCore.installMessage(clone: clone(), clonePath: "/clone", branch: "master")
+        #expect(message == "Installing pulls master in /clone, rebuilds, and relaunches the app.")
+    }
+
+    @Test func installMessageFromAnotherBranchSaysItSwitchesBackAndWhatIsLeftOut() {
+        let message = UpdateCore.installMessage(
+            clone: clone(branch: "feat/x"), clonePath: "/clone", branch: "master")
+        #expect(
+            message
+                == "Installing switches your clone at /clone from feat/x to master, pulls, rebuilds, "
+                + "and relaunches the app, then switches back to feat/x. "
+                + "The new app is built from master, so it won't include changes that are only on feat/x.")
     }
 
     // MARK: - menuTitle

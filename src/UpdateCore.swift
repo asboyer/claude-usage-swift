@@ -7,12 +7,15 @@ import Foundation
 struct CloneState: Equatable {
     /// Checked-out branch, or nil on a detached HEAD.
     let branch: String?
-    /// Modified or staged tracked files. Untracked files do not block a fast-forward pull.
+    /// Modified or staged tracked files. Untracked files do not block a checkout or a pull.
     let hasUncommittedChanges: Bool
-    /// Remote and branch the checked-out branch pulls from, or nil when it has no upstream.
+    /// Remote and branch the local update branch (normally `master`) pulls from, or nil when
+    /// that branch has no upstream or does not exist locally. Read for the update branch, not the
+    /// checked-out one, because the install switches to the update branch before pulling.
     let upstreamRemoteURL: String?
     let upstreamBranch: String?
-    /// Commits on HEAD that the upstream branch lacks, or nil when that could not be counted.
+    /// Commits on the local update branch that its upstream lacks, or nil when that could not be
+    /// counted.
     let unpushedCommitCount: Int?
     /// The latest upstream commit is already part of the commit this app was built from, as when
     /// the app was built from a branch ahead of master. False when git can't tell, for example
@@ -22,8 +25,8 @@ struct CloneState: Equatable {
 
 /// Why the app won't pull into the clone itself.
 enum CloneBlockReason: Equatable {
+    /// Nothing to switch back to after building another branch.
     case detachedHead
-    case otherBranch(String)
     case uncommittedChanges
     case unpushedCommits
     /// Pulls from a fork, another branch, or nothing.
@@ -35,7 +38,8 @@ enum CloneBlockReason: Equatable {
 /// What the menu should offer once the latest upstream commit is known.
 enum UpdateStatus: Equatable {
     case upToDate
-    /// `git pull --ff-only && ./update.sh` in the clone will land on the upstream commit.
+    /// Switching the clone to the update branch, `git pull --ff-only`, and `./update.sh` will build
+    /// the upstream commit.
     case installable
     /// A newer commit exists, but pulling in this clone could fail or leave the build unchanged,
     /// so the app only points at the clone.
@@ -87,16 +91,15 @@ enum UpdateCore {
         return blockReason(clone: clone, branch: branch) == nil ? .installable : .cloneHasLocalChanges
     }
 
-    /// The first reason `git pull --ff-only` in the clone would not land on the latest `branch`
-    /// commit, or nil when it would.
+    /// The first reason the install could not switch to `branch`, fast-forward it to the latest
+    /// commit, and switch back; nil when it can. Being on another branch is not a reason.
     static func blockReason(clone: CloneState, branch: String) -> CloneBlockReason? {
-        guard let current = clone.branch else { return .detachedHead }
-        if current != branch { return .otherBranch(current) }
+        if clone.branch == nil { return .detachedHead }
         if clone.hasUncommittedChanges { return .uncommittedChanges }
         if clone.upstreamBranch != branch || clone.upstreamRemoteURL.map(isUpstreamRepoURL) != true {
             return .notTrackingUpstream
         }
-        // Unpushed commits mean the pull is a no-op and the rebuild reproduces this build.
+        // Unpushed commits on the update branch mean a fast-forward pull can't land on upstream.
         // A count git could not produce (nil) is treated the same, so that clone is never pulled.
         if clone.unpushedCommitCount != 0 { return .unpushedCommits }
         return nil
@@ -108,23 +111,34 @@ enum UpdateCore {
         let problem: String
         switch reason {
         case .detachedHead:
-            problem = "Your clone at \(clonePath) isn't on a branch, so the app won't pull into it."
-        case .otherBranch(let current):
             problem =
-                "Your clone at \(clonePath) is on the \(current) branch, not \(branch), "
-                + "so the app won't switch branches for you."
+                "Your clone at \(clonePath) isn't on a branch, so the app couldn't switch back "
+                + "after updating."
         case .uncommittedChanges:
-            problem = "Your clone at \(clonePath) has uncommitted changes, so the app won't pull into it."
+            problem =
+                "Your clone at \(clonePath) has uncommitted changes, so the app won't switch "
+                + "branches or pull."
         case .unpushedCommits:
             problem =
-                "Your clone at \(clonePath) has commits that aren't on \(repo), "
-                + "so pulling wouldn't change the app."
+                "The \(branch) branch in your clone at \(clonePath) has commits that aren't on "
+                + "\(repo), so it can't be fast-forwarded."
         case .notTrackingUpstream:
             problem =
-                "Your clone at \(clonePath) doesn't pull \(branch) from \(repo) "
-                + "(it may be a fork), so pulling wouldn't get this update."
+                "The \(branch) branch in your clone at \(clonePath) is missing or doesn't pull from "
+                + "\(repo) (it may be a fork), so pulling wouldn't get this update."
         }
         return problem + " Update the clone yourself, then run ./update.sh."
+    }
+
+    /// Says what Install will do to the clone. When the clone is on another branch, the install
+    /// builds `branch` and switches back, so the new app lacks that branch's changes.
+    static func installMessage(clone: CloneState, clonePath: String, branch: String) -> String {
+        guard let current = clone.branch, current != branch else {
+            return "Installing pulls \(branch) in \(clonePath), rebuilds, and relaunches the app."
+        }
+        return "Installing switches your clone at \(clonePath) from \(current) to \(branch), pulls, "
+            + "rebuilds, and relaunches the app, then switches back to \(current). "
+            + "The new app is built from \(branch), so it won't include changes that are only on \(current)."
     }
 
     /// The menu row for a status, or nil when there is nothing to offer.
