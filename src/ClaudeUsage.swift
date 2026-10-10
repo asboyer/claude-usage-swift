@@ -118,6 +118,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var codexTrackingItem: NSMenuItem!
 
+    // Whether Codex spend past its limits is estimated and shown, in the menu and the menu bar.
+    var showCodexOverage: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showCodexOverage, forKey: "showCodexOverage")
+            showCodexOverageItem?.state = showCodexOverage ? .on : .off
+            guard menuReady, showCodexOverage != oldValue else { return }
+            if showCodexOverage {
+                refreshCodexOverage(lastCodexUsage)
+            } else {
+                codexOverage = nil
+                previousCodexOverageCredits = nil
+                codexStatusDisplayMode = .percentage
+                codexStatusText = currentCodexStatusText()
+                updateCodexExtraItem()
+                updateStatusItemTitle()
+            }
+        }
+    }
+    var showCodexOverageItem: NSMenuItem!
+
     // Dollars per Codex credit, used to price the overage estimate.
     var codexCreditPrice: Double = CodexOverageCore.defaultPricePerCredit {
         didSet {
@@ -311,6 +331,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if ud.object(forKey: "codexTrackingEnabled") != nil {
             codexTrackingEnabled = ud.bool(forKey: "codexTrackingEnabled")
+        }
+        if ud.object(forKey: "showCodexOverage") != nil {
+            showCodexOverage = ud.bool(forKey: "showCodexOverage")
         }
         if let savedPrice = ud.object(forKey: "codexCreditPrice") as? Double, savedPrice > 0 {
             codexCreditPrice = savedPrice
