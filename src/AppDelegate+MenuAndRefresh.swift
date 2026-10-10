@@ -121,6 +121,13 @@ extension AppDelegate {
         codexTrackingItem.state = codexTrackingEnabled ? .on : .off
         settingsMenu.addItem(codexTrackingItem)
 
+        showCodexOverageItem = NSMenuItem(
+            title: "Show Codex Extra Usage", action: #selector(toggleShowCodexOverage), keyEquivalent: ""
+        )
+        showCodexOverageItem.target = self
+        showCodexOverageItem.state = showCodexOverage ? .on : .off
+        settingsMenu.addItem(showCodexOverageItem)
+
         // Codex Credit Price submenu — prices the Codex overage estimate
         let creditPriceMenu = NSMenu()
         codexCreditPriceItems = CodexOverageCore.pricePresets.map { price in
@@ -1418,11 +1425,12 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
     func refreshCodexOverage(_ usage: CodexUsage?) {
         guard codexTrackingEnabled, let usage else { return }
         lastCodexUsage = usage
+        guard showCodexOverage else { return }
         let period = codexOveragePeriod
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let estimate = estimateCodexOverage(usage: usage, period: period)
             DispatchQueue.main.async {
-                guard let self, self.codexTrackingEnabled, self.codexAvailable else { return }
+                guard let self, self.codexTrackingEnabled, self.codexAvailable, self.showCodexOverage else { return }
                 // A scan started before the window setting changed would show the wrong period.
                 guard period == self.codexOveragePeriod else { return }
                 self.codexOverage = estimate
@@ -1578,6 +1586,10 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         codexCreditPriceCustomItem?.state = matchedPreset ? .off : .on
         codexCreditPriceCustomItem?.title =
             matchedPreset ? "Custom…" : "Custom (\(CodexOverageCore.formatPrice(codexCreditPrice)))…"
+    }
+
+    @objc func toggleShowCodexOverage() {
+        showCodexOverage = !showCodexOverage
     }
 
     @objc func toggleShowCodexCredits() {
