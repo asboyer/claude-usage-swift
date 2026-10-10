@@ -13,7 +13,7 @@ mkdir -p ClaudeUsage.app/Contents/Resources
 cp AppIcon.icns ClaudeUsage.app/Contents/Resources/AppIcon.icns
 
 # Compile
-swiftc -O -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
+swiftc -O -target "$(uname -m)-apple-macos13.0" -o ClaudeUsage.app/Contents/MacOS/ClaudeUsage \
     src/main.swift \
     src/AppConstants.swift \
     src/KeychainCredentials.swift \
