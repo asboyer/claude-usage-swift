@@ -7,19 +7,6 @@ import SQLite3
 private let opencodeDatabasePath = NSString(string: "~/.local/share/opencode/opencode.db")
     .expandingTildeInPath
 
-/// Month-to-date cost per model, summed over completed assistant turns.
-///
-/// opencode inserts the assistant row when a turn starts and fills in `cost` when it
-/// finishes, so an in-flight turn contributes nothing until the next refresh picks it up.
-private let opencodeCostQuery = """
-    SELECT json_extract(data, '$.modelID'), SUM(json_extract(data, '$.cost'))
-    FROM message
-    WHERE time_created >= ?
-      AND json_extract(data, '$.role') = 'assistant'
-      AND json_extract(data, '$.cost') > 0
-    GROUP BY 1
-    """
-
 func fetchOpencodeUsage(completion: @escaping (OpencodeUsage?) -> Void) {
     guard FileManager.default.fileExists(atPath: opencodeDatabasePath) else {
         completion(nil)
@@ -33,27 +20,10 @@ func fetchOpencodeUsage(completion: @escaping (OpencodeUsage?) -> Void) {
     completion(OpencodeUsage(models: OpencodeUsageCore.rank(costsByModel), monthStart: monthStart))
 }
 
-/// Every completed, paid assistant turn since `cutoff`, for the spend history. Older opencode
-/// versions record no token total, so it is summed from the parts.
-private let opencodeRequestQuery = """
-    SELECT time_created, json_extract(data, '$.modelID'),
-           COALESCE(json_extract(data, '$.tokens.total'),
-                    COALESCE(json_extract(data, '$.tokens.input'), 0)
-                    + COALESCE(json_extract(data, '$.tokens.output'), 0)
-                    + COALESCE(json_extract(data, '$.tokens.reasoning'), 0)
-                    + COALESCE(json_extract(data, '$.tokens.cache.read'), 0)
-                    + COALESCE(json_extract(data, '$.tokens.cache.write'), 0)),
-           json_extract(data, '$.cost')
-    FROM message
-    WHERE time_created >= ?
-      AND json_extract(data, '$.role') = 'assistant'
-      AND json_extract(data, '$.cost') > 0
-    """
-
 /// Nil when opencode isn't installed or its database can't be read.
 func fetchOpencodeRequestCosts(since cutoff: Date) -> [OpencodeRequestCost]? {
     guard FileManager.default.fileExists(atPath: opencodeDatabasePath) else { return nil }
-    return queryOpencode(opencodeRequestQuery, since: cutoff) { statement in
+    return queryOpencode(\.requestQuery, since: cutoff) { statement in
         guard let modelID = sqlite3_column_text(statement, 1) else { return nil }
         return OpencodeRequestCost(
             timestamp: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 0)) / 1000),
@@ -64,17 +34,18 @@ func fetchOpencodeRequestCosts(since cutoff: Date) -> [OpencodeRequestCost]? {
 }
 
 private func queryOpencodeCosts(since monthStart: Date) -> [String: Double]? {
-    let rows = queryOpencode(opencodeCostQuery, since: monthStart) { statement -> (String, Double)? in
+    let rows = queryOpencode(\.costQuery, since: monthStart) { statement -> (String, Double)? in
         guard let modelID = sqlite3_column_text(statement, 0) else { return nil }
         return (String(cString: modelID), sqlite3_column_double(statement, 1))
     }
     return rows.map { Dictionary($0, uniquingKeysWith: +) }
 }
 
-/// Opens the database read-only so a running opencode is never blocked or modified, and binds
-/// `since` as the query's one millisecond-timestamp parameter.
+/// Opens the database read-only so a running opencode is never blocked or modified, picks the
+/// query for whichever message table this opencode version writes, and binds `since` as the
+/// query's one millisecond-timestamp parameter.
 private func queryOpencode<Row>(
-    _ query: String, since: Date, row: (OpaquePointer?) -> Row?
+    _ query: (OpencodeMessageTable) -> String, since: Date, row: (OpaquePointer?) -> Row?
 ) -> [Row]? {
     let escapedPath =
         opencodeDatabasePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
@@ -92,8 +63,10 @@ private func queryOpencode<Row>(
     }
     defer { sqlite3_close(database) }
 
+    guard let table = opencodeMessageTable(in: database) else { return nil }
+
     var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK else {
+    guard sqlite3_prepare_v2(database, query(table), -1, &statement, nil) == SQLITE_OK else {
         sqlite3_finalize(statement)
         return nil
     }
@@ -106,4 +79,23 @@ private func queryOpencode<Row>(
         if let value = row(statement) { rows.append(value) }
     }
     return rows
+}
+
+private func opencodeMessageTable(in database: OpaquePointer?) -> OpencodeMessageTable? {
+    var statement: OpaquePointer?
+    guard
+        sqlite3_prepare_v2(
+            database, "SELECT name FROM sqlite_master WHERE type = 'table'", -1, &statement, nil)
+            == SQLITE_OK
+    else {
+        sqlite3_finalize(statement)
+        return nil
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var tableNames: Set<String> = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+        if let name = sqlite3_column_text(statement, 0) { tableNames.insert(String(cString: name)) }
+    }
+    return OpencodeMessageTable.preferred(among: tableNames)
 }
