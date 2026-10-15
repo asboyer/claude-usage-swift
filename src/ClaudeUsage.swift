@@ -181,6 +181,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var codexOverage: CodexOverageEstimate?
     var lastCodexUsage: CodexUsage?
 
+    // Whether a Codex thread sent a request on Fast in the last 15 minutes; tags the Codex header.
+    var codexFastActive = false
+    var codexHeaderItem: NSMenuItem?
+
     // Codex's menu bar reading and whether its overage estimate currently owns that text.
     var codexStatusWindow: CodexRateWindow?
     var codexStatusDisplayMode: StatusDisplayMode = .percentage

@@ -307,4 +307,13 @@ struct SpendHistoryCoreTests {
         let cutoff = SpendLedgerBuilder.codexRescanCutoff(lastScan: date("2026-10-06", hour: 15), calendar: calendar)
         #expect(cutoff == calendar.startOfDay(for: date("2026-10-05")))
     }
+
+    @Test func ledgerPricedBeforeFastCostTwiceNeedsAFullCodexRescan() throws {
+        // A ledger saved before the pricing field existed decodes without it.
+        let old = try JSONDecoder().decode(SpendLedger.self, from: Data(#"{"lastCodexScan": 0}"#.utf8))
+        #expect(old.needsFullCodexRescan)
+        var current = old
+        current.codexPricing = SpendLedger.currentCodexPricing
+        #expect(!current.needsFullCodexRescan)
+    }
 }

@@ -80,6 +80,17 @@ struct SpendLedger: Codable, Equatable {
     /// Day keys stay in the time zone the ledger was started in, so a trip abroad cannot file one
     /// request under two different days and count it twice.
     var timeZone: String?
+    /// How the stored Codex credits were priced. Missing from ledgers priced before Fast mode cost 2x.
+    var codexPricing: Int?
+
+    /// Bumped whenever Codex credit pricing changes, so the next scan rereads every session and
+    /// replaces the days priced the old way.
+    static let currentCodexPricing = 2
+
+    /// An incremental Codex rescan would leave days outside its cutoff at the old prices.
+    var needsFullCodexRescan: Bool {
+        return lastCodexScan == nil || codexPricing != SpendLedger.currentCodexPricing
+    }
 
     var calendar: Calendar {
         var calendar = Calendar.current
@@ -102,6 +113,7 @@ struct SpendLedger: Codable, Equatable {
         lastCodexScan = try values.decodeIfPresent(Date.self, forKey: .lastCodexScan)
         lastCodexReading = try values.decodeIfPresent(CodexLimitReading.self, forKey: .lastCodexReading)
         timeZone = try values.decodeIfPresent(String.self, forKey: .timeZone)
+        codexPricing = try values.decodeIfPresent(Int.self, forKey: .codexPricing)
     }
 
     /// Keeps, per day and model, whichever entry of `provider` covers more tokens. A scan only ever

@@ -12,7 +12,8 @@ struct CodexOverageCoreTests {
         input: Int = 1_000_000,
         cached: Int = 0,
         output: Int = 0,
-        offset: TimeInterval = 60
+        offset: TimeInterval = 60,
+        tier: String? = nil
     ) -> CodexModelRequest {
         return CodexModelRequest(
             responseID: responseID,
@@ -20,7 +21,8 @@ struct CodexOverageCoreTests {
             model: model,
             inputTokens: input,
             cachedInputTokens: cached,
-            outputTokens: output
+            outputTokens: output,
+            serviceTier: tier
         )
     }
 
@@ -67,6 +69,20 @@ struct CodexOverageCoreTests {
 
     @Test func creditsAreNilForUnpricedModel() {
         #expect(request(model: "codex-auto-review").credits == nil)
+    }
+
+    @Test func creditsDoubleOnFast() {
+        #expect(request(input: 1_000_000, tier: "priority").credits == 500)
+        #expect(request(input: 1_000_000, tier: "fast").credits == 500)
+    }
+
+    @Test func creditsStayStandardForDefaultOrUnrecordedSpeed() {
+        #expect(request(input: 1_000_000, tier: "default").credits == 250)
+        #expect(request(input: 1_000_000, tier: nil).credits == 250)
+    }
+
+    @Test func creditsAreNilForASpeedWithNoPublishedMultiplier() {
+        #expect(request(input: 1_000_000, tier: "ultrafast").credits == nil)
     }
 
     // MARK: - Limit Readings
@@ -129,6 +145,49 @@ struct CodexOverageCoreTests {
         parser.consume(
             line: usageRecordLine("2026-10-06T16:01:00Z", responseID: "r1", turnID: "other", input: 1, cached: 0, output: 1))
         #expect(parser.requests.first?.model == "gpt-5.6-sol")
+    }
+
+    private func threadSettingsLine(_ timestamp: String, threadID: String, tier: String) -> String {
+        return """
+            {"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"thread_settings_applied",\
+            "thread_id":"\(threadID)","thread_settings":{"model":"gpt-6-astra","service_tier":"\(tier)"}}}
+            """
+    }
+
+    private func threadUsageLine(_ timestamp: String, responseID: String, threadID: String) -> String {
+        return """
+            {"timestamp":"\(timestamp)","type":"token_usage_record","payload":{"thread_id":"\(threadID)",\
+            "turn_id":"t1","response_id":"\(responseID)","usage":{"input_tokens":10,"cached_input_tokens":0,\
+            "output_tokens":1}}}
+            """
+    }
+
+    @Test func parserGivesEachRequestItsThreadsSpeedAtTheTime() {
+        var parser = CodexSessionParser()
+        parser.consume(line: threadSettingsLine("2026-10-06T16:00:00Z", threadID: "a", tier: "priority"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:01:00Z", responseID: "r1", threadID: "a"))
+        parser.consume(line: threadSettingsLine("2026-10-06T16:02:00Z", threadID: "a", tier: "default"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:03:00Z", responseID: "r2", threadID: "a"))
+        #expect(parser.requests.map(\.serviceTier) == ["priority", "default"])
+    }
+
+    @Test func parserKeepsThreadsAtDifferentSpeedsApart() {
+        var parser = CodexSessionParser()
+        parser.consume(line: threadSettingsLine("2026-10-06T16:00:00Z", threadID: "fast", tier: "priority"))
+        parser.consume(line: threadSettingsLine("2026-10-06T16:00:01Z", threadID: "standard", tier: "default"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:01:00Z", responseID: "r1", threadID: "fast"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:01:01Z", responseID: "r2", threadID: "standard"))
+        #expect(parser.requests.map(\.serviceTier) == ["priority", "default"])
+    }
+
+    @Test func parserBackfillsRequestsSentBeforeTheThreadFirstLoggedItsSpeed() {
+        // Codex logs settings only when they are applied, often after the thread's first requests.
+        var parser = CodexSessionParser()
+        parser.consume(line: threadUsageLine("2026-10-06T16:01:00Z", responseID: "r1", threadID: "a"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:01:30Z", responseID: "r2", threadID: "b"))
+        parser.consume(line: threadSettingsLine("2026-10-06T16:02:00Z", threadID: "a", tier: "priority"))
+        parser.consume(line: threadUsageLine("2026-10-06T16:03:00Z", responseID: "r3", threadID: "a"))
+        #expect(parser.requests.map(\.serviceTier) == ["priority", nil, "priority"])
     }
 
     @Test func parserReadsLimitReadingsEvenWithoutTokenInfo() {
@@ -224,6 +283,32 @@ struct CodexOverageCoreTests {
             ])
         #expect(estimate.models.map(\.credits).reduce(0, +) == estimate.credits)
         #expect(estimate.unpricedRequests == 1)
+    }
+
+    @Test func estimateSplitsAModelsFastAndStandardSpend() {
+        let readings = [reading(offset: 0, usedPercent: 100)]
+        let requests = [
+            request("r1", input: 1_000_000, tier: "priority"),  // 500 credits
+            request("r2", input: 1_000_000, tier: "default"),  // 250 credits
+            request("r3", input: 1_000_000, tier: nil),  // 250 credits, speed unknown
+        ]
+        let estimate = CodexOverageCore.estimate(requests: requests, readings: readings, since: start)
+        #expect(estimate.credits == 1000)
+        #expect(
+            estimate.models == [
+                CodexModelOverage(model: "gpt-6-astra", credits: 500, requests: 2, tokens: 2_000_000),
+                CodexModelOverage(model: "gpt-6-astra", credits: 500, requests: 1, tokens: 1_000_000, fast: true),
+            ])
+        #expect(estimate.unknownSpeedRequests == 1)
+    }
+
+    @Test func fastIsActiveOnlyWhileAFastRequestIsRecent() {
+        let now = start.addingTimeInterval(1000)
+        let fast = request("r1", offset: 900, tier: "priority")
+        let standard = request("r2", offset: 990, tier: "default")
+        #expect(CodexOverageCore.isFastActive(requests: [standard, fast], now: now, window: 600))
+        #expect(!CodexOverageCore.isFastActive(requests: [standard, fast], now: now, window: 60))
+        #expect(!CodexOverageCore.isFastActive(requests: [standard], now: now, window: 600))
     }
 
     @Test func tokenShareSplitsPricedTokensByModel() {

@@ -54,8 +54,10 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
     } ?? []
     let calendar = saved.calendar
     let codexCutoff =
-        saved.lastCodexScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0, calendar: calendar) }
-        ?? .distantPast
+        saved.needsFullCodexRescan
+        ? .distantPast
+        : saved.lastCodexScan.map { SpendLedgerBuilder.codexRescanCutoff(lastScan: $0, calendar: calendar) }
+            ?? .distantPast
     let codex = includeCodex ? scanCodexSessions(modifiedSince: codexCutoff) : nil
     // Opencode keeps its own history, so it is always read in full.
     let opencode = SpendLedgerBuilder.opencodeDays(
@@ -76,7 +78,10 @@ func rescanSpendLedger(includeCodex: Bool, includeOpencode: Bool, now: Date = Da
     }
     ledger.merge(.opencode, days: opencode)
     ledger.lastScan = now
-    if includeCodex { ledger.lastCodexScan = now }
+    if includeCodex {
+        ledger.lastCodexScan = now
+        ledger.codexPricing = SpendLedger.currentCodexPricing
+    }
     writeSpendLedger(ledger)
     return ledger
 }
