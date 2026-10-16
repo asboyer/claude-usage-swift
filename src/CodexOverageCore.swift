@@ -35,6 +35,28 @@ enum CodexCreditRateCard {
     }
 }
 
+/// The speed a request ran at, which Codex logs as the thread's `service_tier`.
+/// Source: https://learn.chatgpt.com/docs/pricing (checked 2026-10-15).
+enum CodexServiceTier {
+    /// Fast mode draws credits at 2x the Standard rate. Codex logs it as "priority".
+    static let fastCreditMultiplier = 2.0
+
+    static func isFast(_ tier: String?) -> Bool {
+        return tier == "priority" || tier == "fast"
+    }
+
+    /// Returns nil for a tier with no published multiplier, such as Ultrafast, so it is reported
+    /// as unpriced rather than billed at a guessed rate. A request with no recorded tier is priced
+    /// as Standard, which is what Codex runs when no tier is set.
+    static func creditMultiplier(for tier: String?) -> Double? {
+        switch tier {
+        case nil, "default": return 1
+        case let tier? where isFast(tier): return fastCreditMultiplier
+        default: return nil
+        }
+    }
+}
+
 // MARK: - Session Records
 
 /// One model request's token usage, read from a Codex `token_usage_record`.
@@ -49,6 +71,12 @@ struct CodexModelRequest: Equatable {
     let cachedInputTokens: Int
     /// Includes reasoning tokens, matching how Codex reports it.
     let outputTokens: Int
+    /// Nil when the session never recorded the thread's speed.
+    var serviceTier: String? = nil
+
+    var isFast: Bool {
+        return CodexServiceTier.isFast(serviceTier)
+    }
 
     /// Falls back to time and size for records written before Codex logged a response ID.
     var identity: String {
@@ -60,13 +88,16 @@ struct CodexModelRequest: Equatable {
     }
 
     var credits: Double? {
-        guard let rates = CodexCreditRateCard.rates(for: model) else { return nil }
+        guard
+            let rates = CodexCreditRateCard.rates(for: model),
+            let multiplier = CodexServiceTier.creditMultiplier(for: serviceTier)
+        else { return nil }
         let uncachedInput = max(inputTokens - cachedInputTokens, 0)
         let weighted =
             Double(uncachedInput) * rates.input
             + Double(cachedInputTokens) * rates.cachedInput
             + Double(outputTokens) * rates.output
-        return weighted / 1_000_000
+        return weighted * multiplier / 1_000_000
     }
 }
 
@@ -93,17 +124,27 @@ struct CodexLimitReading: Codable, Equatable {
 /// Reads model requests and limit readings out of one session file, line by line.
 /// Requests do not name their model, so the model comes from the `turn_context` that opened
 /// the request's turn.
+///
+/// Requests do not name their speed either. Codex logs a thread's `service_tier` in a
+/// `thread_settings_applied` event, but only when settings are applied, often well after the
+/// thread's first requests, so a request takes the latest tier logged for its thread, or the
+/// thread's first logged tier if it came before any. Codex's own logs show that first tier in
+/// effect from the thread's start.
 struct CodexSessionParser {
     private(set) var requests: [CodexModelRequest] = []
     private(set) var readings: [CodexLimitReading] = []
     private var modelsByTurn: [String: String] = [:]
     private var latestModel: String?
+    private var tiersByThread: [String: String] = [:]
+    private var latestTier: String?
+    /// Indexes into `requests` of requests sent before their thread logged a tier.
+    private var untieredByThread: [String: [Int]] = [:]
 
     mutating func consume(line: String) {
         // Every record worth reading names one of these types, so the scan skips the rest cheaply.
         guard
             line.contains("\"token_usage_record\"") || line.contains("\"token_count\"")
-                || line.contains("\"turn_context\"")
+                || line.contains("\"turn_context\"") || line.contains("\"thread_settings_applied\"")
         else { return }
         guard
             let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
@@ -123,6 +164,13 @@ struct CodexSessionParser {
         case "token_usage_record":
             guard let usage = payload["usage"] as? [String: Any] else { return }
             let model = (payload["turn_id"] as? String).flatMap { modelsByTurn[$0] } ?? latestModel
+            let threadID = payload["thread_id"] as? String
+            // A record without a thread ID predates per-thread logging, so the file's latest tier stands in.
+            var tier = latestTier
+            if let threadID {
+                tier = tiersByThread[threadID]
+                if tier == nil { untieredByThread[threadID, default: []].append(requests.count) }
+            }
             requests.append(
                 CodexModelRequest(
                     responseID: payload["response_id"] as? String,
@@ -130,8 +178,20 @@ struct CodexSessionParser {
                     model: model,
                     inputTokens: usage["input_tokens"] as? Int ?? 0,
                     cachedInputTokens: usage["cached_input_tokens"] as? Int ?? 0,
-                    outputTokens: usage["output_tokens"] as? Int ?? 0
+                    outputTokens: usage["output_tokens"] as? Int ?? 0,
+                    serviceTier: tier
                 ))
+        case "event_msg" where payload["type"] as? String == "thread_settings_applied":
+            guard
+                let threadID = payload["thread_id"] as? String,
+                let settings = payload["thread_settings"] as? [String: Any],
+                let tier = settings["service_tier"] as? String
+            else { return }
+            tiersByThread[threadID] = tier
+            latestTier = tier
+            for index in untieredByThread.removeValue(forKey: threadID) ?? [] {
+                requests[index].serviceTier = tier
+            }
         case "event_msg":
             guard
                 payload["type"] as? String == "token_count",
@@ -154,12 +214,14 @@ struct CodexSessionParser {
 
 // MARK: - Overage Estimate
 
-/// One model's share of the overage estimate.
+/// One model's share of the overage estimate, at one speed.
 struct CodexModelOverage: Equatable {
     let model: String
     var credits: Double
     var requests: Int
     var tokens = 0
+    /// Fast and Standard spend on the same model are kept apart, since Fast costs twice as much.
+    var fast = false
 
     func dollars(pricePerCredit: Double) -> Double {
         return credits * pricePerCredit
@@ -221,7 +283,9 @@ struct CodexOverageEstimate: Equatable {
     var unpricedRequests = 0
     /// Tokens across the priced requests in `credits`.
     var tokens = 0
-    /// Priced spend per model, most credits first.
+    /// Priced requests whose session never recorded a speed, priced as Standard.
+    var unknownSpeedRequests = 0
+    /// Priced spend per model and speed, most credits first.
     var models: [CodexModelOverage] = []
 
     func dollars(pricePerCredit: Double) -> Double {
@@ -262,15 +326,25 @@ enum CodexOverageCore {
             estimate.credits += credits
             estimate.overageRequests += 1
             estimate.tokens += request.totalTokens
-            byModel[model, default: CodexModelOverage(model: model, credits: 0, requests: 0)].credits += credits
-            byModel[model]?.requests += 1
-            byModel[model]?.tokens += request.totalTokens
+            if request.serviceTier == nil { estimate.unknownSpeedRequests += 1 }
+            let key = request.isFast ? model + "|fast" : model
+            byModel[key, default: CodexModelOverage(model: model, credits: 0, requests: 0, fast: request.isFast)]
+                .credits += credits
+            byModel[key]?.requests += 1
+            byModel[key]?.tokens += request.totalTokens
         }
         estimate.models = byModel.values.sorted { first, second in
             if first.credits != second.credits { return first.credits > second.credits }
-            return first.model < second.model
+            if first.model != second.model { return first.model < second.model }
+            return !first.fast && second.fast
         }
         return estimate
+    }
+
+    /// Whether any request sent in the last `window` ran on Fast. Speed is set per thread, so with
+    /// threads open at both speeds this reports Fast as long as one of them is still sending.
+    static func isFastActive(requests: [CodexModelRequest], now: Date, window: TimeInterval = 15 * 60) -> Bool {
+        return requests.contains { $0.isFast && $0.timestamp > now.addingTimeInterval(-window) && $0.timestamp <= now }
     }
 
     /// The requests sent since `start` while a limit was already exhausted, priced or not, each

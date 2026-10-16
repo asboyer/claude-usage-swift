@@ -450,14 +450,34 @@ extension AppDelegate {
     }
 
     func providerHeaderItem(_ provider: UsageProvider) -> NSMenuItem {
-        let title = providerSectionTitles[provider] ?? ""
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         item.isEnabled = false
+        setProviderHeaderTitle(item, provider)
+        if provider == .codex {
+            codexHeaderItem = item
+        }
+        return item
+    }
+
+    /// The Codex header reads "Codex · Fast" while a thread is spending at Fast's doubled rate.
+    private func setProviderHeaderTitle(_ item: NSMenuItem, _ provider: UsageProvider) {
+        var title = providerSectionTitles[provider] ?? ""
+        if provider == .codex && codexFastActive {
+            title += " · Fast"
+        }
+        item.title = title
         item.attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
             .foregroundColor: NSColor.secondaryLabelColor,
         ])
-        return item
+    }
+
+    func setCodexFastActive(_ active: Bool) {
+        guard active != codexFastActive else { return }
+        codexFastActive = active
+        if let item = codexHeaderItem {
+            setProviderHeaderTitle(item, .codex)
+        }
     }
 
     func addUsageSection(provider: UsageProvider, keys: [String], showsHeader: Bool) {
@@ -688,8 +708,10 @@ extension AppDelegate {
         let includeOpencode = opencodeTrackingEnabled
         // The ledger is read off the main thread too, since it grows with every day of history.
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let lastScan = loadSpendLedger().lastScan
-            if lastScan.map({ Date().timeIntervalSince($0) >= spendLedgerRescanInterval }) ?? true {
+            let ledger = loadSpendLedger()
+            let stale = ledger.lastScan.map { Date().timeIntervalSince($0) >= spendLedgerRescanInterval } ?? true
+            // Codex days priced before a pricing change are repriced at once rather than at the next interval.
+            if stale || (includeCodex && ledger.needsFullCodexRescan) {
                 rescanSpendLedger(includeCodex: includeCodex, includeOpencode: includeOpencode)
             }
             DispatchQueue.main.async { self?.spendLedgerScanInFlight = false }
@@ -1425,12 +1447,16 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
     func refreshCodexOverage(_ usage: CodexUsage?) {
         guard codexTrackingEnabled, let usage else { return }
         lastCodexUsage = usage
-        guard showCodexOverage else { return }
         let period = codexOveragePeriod
+        let showOverage = showCodexOverage
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let estimate = estimateCodexOverage(usage: usage, period: period)
+            // The Fast tag reads only the last 15 minutes of sessions, so it runs even with Extra hidden.
+            let fastActive = isCodexFastActive()
+            let estimate = showOverage ? estimateCodexOverage(usage: usage, period: period) : nil
             DispatchQueue.main.async {
-                guard let self, self.codexTrackingEnabled, self.codexAvailable, self.showCodexOverage else { return }
+                guard let self, self.codexTrackingEnabled, self.codexAvailable else { return }
+                self.setCodexFastActive(fastActive)
+                guard let estimate, self.showCodexOverage else { return }
                 // A scan started before the window setting changed would show the wrong period.
                 guard period == self.codexOveragePeriod else { return }
                 self.codexOverage = estimate
@@ -1506,7 +1532,8 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             let dollars = CodexOverageCore.formatDollars(model.dollars(pricePerCredit: codexCreditPrice))
             let credits = CodexOverageCore.formatCredits(model.credits)
             let spend = showCodexCredits ? "\(dollars)  \(credits)" : dollars
-            return (model: model.model, spend: spend, share: CodexOverageCore.formatShare(overage.tokenShare(of: model)))
+            let name = model.fast ? "\(model.model) · Fast" : model.model
+            return (model: name, spend: spend, share: CodexOverageCore.formatShare(overage.tokenShare(of: model)))
         }
         // The token share sits right-aligned past the widest spend, so cost and usage read side by side.
         func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
@@ -1539,7 +1566,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         submenu.addItem(NSMenuItem.separator())
         var footer = "\(overage.overageRequests) model requests past the limit"
         if overage.unpricedRequests > 0 {
-            footer += ", \(overage.unpricedRequests) more on models without a published rate"
+            footer += ", \(overage.unpricedRequests) more without a published rate"
         }
         let info =
             "Estimated from the tokens Codex logged on this Mac for each model request sent while "
@@ -1548,9 +1575,20 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             + "tokens, cached input included, so a model that mostly reads from cache can show a large "
             + "share for little spend. Priced "
             + "with OpenAI's Codex credit rates at \(CodexOverageCore.formatPrice(codexCreditPrice)) per "
-            + "credit (Settings › Codex Credit Price). Codex Cloud tasks and other devices are not included."
+            + "credit (Settings › Codex Credit Price), doubled for requests sent on Fast. "
+            + unknownSpeedNote(overage)
+            + "Codex Cloud tasks and other devices are not included."
         submenu.addItem(infoFooterItem(footer, info: info, alignedTo: rowWidths.max() ?? 0))
         return submenu
+    }
+
+    /// Some sessions never log their speed; their requests are priced as Standard, which undercounts
+    /// any of them that ran on Fast.
+    private func unknownSpeedNote(_ overage: CodexOverageEstimate) -> String {
+        let count = overage.unknownSpeedRequests
+        guard count > 0 else { return "" }
+        let requests = count == 1 ? "1 request" : "\(count) requests"
+        return "\(requests) came from sessions that never logged their speed and are priced as Standard. "
     }
 
     /// A dimmed footer line ending in an ⓘ at the menu's trailing edge. Hovering the line shows

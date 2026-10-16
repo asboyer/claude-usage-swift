@@ -247,10 +247,35 @@ func estimateCodexOverage(usage: CodexUsage, period: CodexOveragePeriod, now: Da
     codexSessionScanLock.lock()
     defer { codexSessionScanLock.unlock() }
 
-    var scans: [URL: CodexSessionScan] = [:]
+    let (requests, readings) = cachedCodexSessionRecords(modifiedSince: windowStart)
+    // Files outside every period are dropped rather than kept forever. Those inside a longer
+    // period than this one stay cached, so switching the window setting does not rescan them.
+    let keepSince =
+        CodexOveragePeriod.allCases
+        .map { $0.range(now: now, weeklyWindow: usage.weekly).start }
+        .min() ?? windowStart
+    codexSessionScans = codexSessionScans.filter { $0.value.modified >= keepSince }
+    return CodexOverageCore.estimate(
+        requests: requests, readings: readings, since: windowStart, until: range.end, period: period)
+}
+
+/// Whether a Codex thread on this machine sent a request on Fast in the last 15 minutes.
+func isCodexFastActive(now: Date = Date()) -> Bool {
+    let window: TimeInterval = 15 * 60
+    codexSessionScanLock.lock()
+    defer { codexSessionScanLock.unlock() }
+    let (requests, _) = cachedCodexSessionRecords(modifiedSince: now.addingTimeInterval(-window))
+    return CodexOverageCore.isFastActive(requests: requests, now: now, window: window)
+}
+
+/// Parses session files touched since `cutoff`, reusing the cached parse of any file unchanged
+/// since it was read. Callers hold `codexSessionScanLock`.
+private func cachedCodexSessionRecords(modifiedSince cutoff: Date) -> (
+    requests: [CodexModelRequest], readings: [CodexLimitReading]
+) {
     var requests: [CodexModelRequest] = []
     var readings: [CodexLimitReading] = []
-    for (url, size, modified) in codexSessionFiles(modifiedSince: windowStart) {
+    for (url, size, modified) in codexSessionFiles(modifiedSince: cutoff) {
         let scan: CodexSessionScan
         if let cached = codexSessionScans[url], cached.size == size, cached.modified == modified {
             scan = cached
@@ -261,20 +286,12 @@ func estimateCodexOverage(usage: CodexUsage, period: CodexOveragePeriod, now: Da
             }
             scan = CodexSessionScan(
                 size: size, modified: modified, requests: parser.requests, readings: parser.readings)
+            codexSessionScans[url] = scan
         }
-        scans[url] = scan
         requests.append(contentsOf: scan.requests)
         readings.append(contentsOf: scan.readings)
     }
-    // Files outside every period are dropped rather than kept forever. Those inside a longer
-    // period than this one stay cached, so switching the window setting does not rescan them.
-    let keepSince =
-        CodexOveragePeriod.allCases
-        .map { $0.range(now: now, weeklyWindow: usage.weekly).start }
-        .min() ?? windowStart
-    codexSessionScans = codexSessionScans.filter { $0.value.modified >= keepSince }.merging(scans) { $1 }
-    return CodexOverageCore.estimate(
-        requests: requests, readings: readings, since: windowStart, until: range.end, period: period)
+    return (requests, readings)
 }
 
 private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: Int, modified: Date)] {
@@ -301,11 +318,17 @@ private func codexSessionFiles(modifiedSince cutoff: Date) -> [(url: URL, size: 
 /// Every model request and limit reading in local sessions touched since `cutoff`, uncached:
 /// the history scan runs rarely and reaches back further than any overage period.
 func scanCodexSessions(modifiedSince cutoff: Date) -> (requests: [CodexModelRequest], readings: [CodexLimitReading]) {
-    var parser = CodexSessionParser()
+    var requests: [CodexModelRequest] = []
+    var readings: [CodexLimitReading] = []
+    // One parser per file, as the overage estimate does, so one session's model or speed never
+    // carries over to the next file's requests.
     for (url, _, _) in codexSessionFiles(modifiedSince: cutoff) {
+        var parser = CodexSessionParser()
         for line in LineReader(url: url) {
             parser.consume(line: line)
         }
+        requests.append(contentsOf: parser.requests)
+        readings.append(contentsOf: parser.readings)
     }
-    return (parser.requests, parser.readings)
+    return (requests, readings)
 }
