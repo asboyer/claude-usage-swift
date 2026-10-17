@@ -181,7 +181,7 @@ buckets that are metered separately.
 
 1. Reads the access token the Cursor CLI stores in the login keychain (`cursor-access-token` / `cursor-user`)
 2. Calls `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`
-3. Shows `autoPercentUsed` as **Cursor Models** (Composer, Cursor Grok) and `apiPercentUsed` as **Other Models**, both resetting at the end of the billing cycle
+3. Shows `autoPercentUsed` as **Cursor Models** (Composer, Cursor Grok) and `apiPercentUsed` as **Other Models**, both resetting at the end of the billing cycle (weekly-cycle plans have no Other Models pool, so that row is hidden)
 
 The two buckets have different limits, so their percentages are not comparable to each other —
 they are the same two bars Cursor shows under Plan & Usage, rounded up the same way. The menu bar

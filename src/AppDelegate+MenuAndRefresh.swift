@@ -1716,6 +1716,7 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
             for key in cursorCategoryKeys {
                 usageItems[key]?.title = "\(categoryLabel(for: key)): --"
                 usageItems[key]?.attributedTitle = nil
+                usageItems[key]?.isHidden = false
                 rateItems[key]?.isHidden = true
             }
             rebuildMenuIfSectionVisibilityChanged(wasAvailable: wasAvailable, isAvailable: cursorAvailable)
@@ -1725,6 +1726,10 @@ curl -sS 'https://api.anthropic.com/api/oauth/usage' \\
         cursorAvailable = true
         updateCursorUsageItem(key: "cursor_models", percent: usage.cursorModelsPercent, usage: usage)
         updateCursorUsageItem(key: "cursor_other_models", percent: usage.otherModelsPercent, usage: usage)
+        usageItems["cursor_other_models"]?.isHidden = !usage.hasOtherModelsBucket
+        if !usage.hasOtherModelsBucket {
+            rateItems["cursor_other_models"]?.isHidden = true
+        }
 
         // Both buckets reset on the same billing cycle, so the menu bar tracks whichever
         // of the two is closest to running out.
