@@ -9,9 +9,15 @@ struct CursorUsage {
     let cycleEndsAt: Date?
     let cycleSeconds: TimeInterval
 
+    /// Weekly-cycle plans have a single Cursor-models pool; third-party models are billed separately.
+    /// Legacy plans bill monthly, so an unknown cycle length keeps the bucket.
+    var hasOtherModelsBucket: Bool {
+        return cycleSeconds == 0 || cycleSeconds > 14 * 86400
+    }
+
     /// The bucket closest to its limit, which is the one worth putting in the menu bar.
     var highestPercent: Double {
-        return max(cursorModelsPercent, otherModelsPercent)
+        return hasOtherModelsBucket ? max(cursorModelsPercent, otherModelsPercent) : cursorModelsPercent
     }
 }
 
